@@ -5,14 +5,14 @@ import { getDatabase } from "firebase/database";
 import { getStorage } from "firebase/storage";
 
 const firebaseConfig = {
-    apiKey: "AIzaSyBhT_NN5BGOap2d2F9TiCbyjDlDcZ1xIfo",
-    authDomain: "likhith-chat-application29.firebaseapp.com",
-    projectId: "likhith-chat-application29",
-    storageBucket: "likhith-chat-application29.firebasestorage.app",
-    messagingSenderId: "423377327251",
-    appId: "1:423377327251:web:d56ea2cfec508eab872966",
-    measurementId: "G-YJ8FTZQEFF",
-    databaseURL: "https://likhith-chat-application29-default-rtdb.asia-southeast1.firebasedatabase.app"
+    apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
+    authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+    projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
+    storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
+    messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
+    appId: import.meta.env.VITE_FIREBASE_APP_ID,
+    measurementId: import.meta.env.VITE_FIREBASE_MEASUREMENT_ID,
+    databaseURL: import.meta.env.VITE_FIREBASE_DATABASE_URL
 };
 
 export const appId = 'likhith-chat-application29';
