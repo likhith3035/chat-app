@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { db, rtdb, USERS_COL, CHATS_COL, APPEALS_COL, ADMIN_EMAILS } from '../firebase';
@@ -306,7 +306,7 @@ export default function Admin() {
                                     chatName = room.groupName || 'Group Chat';
                                     chatType = room.public ? 'Public Room' : 'Group Chat';
                                 } else if (room.type === 'one_on_one') {
-                                    const partnerId = room.participants.find((uid: string) => uid !== currentUser.uid);
+                                    const partnerId = room.participants.find((uid: string) => uid !== (currentUser?.uid || ''));
                                     const partner = users.find(u => u.uid === partnerId);
                                     chatName = partner ? `Chat with ${partner.name}` : '1-on-1 Chat';
                                     chatType = '1-on-1';

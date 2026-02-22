@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { collection, query, where, onSnapshot, orderBy, doc, setDoc, serverTimestamp } from 'firebase/firestore';
+import { createContext, useContext, useEffect, useState } from 'react';
+import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { ref, onValue, set, onDisconnect, serverTimestamp as rtdbTimestamp } from 'firebase/database';
 import { db, rtdb, CHATS_COL, USERS_COL } from '../firebase';
 import { useAuth } from './AuthContext';
@@ -28,7 +28,7 @@ interface ChatContextType {
     conversations: ChatData[];
     users: Record<string, UserData>;
     onlineStatus: Record<string, boolean>;
-    typingStatus: Record<string, boolean>; // chatId -> typing
+    typingStatus: Record<string, boolean>; // chatId -> typing (Currently unused in global context)
 }
 
 const ChatContext = createContext<ChatContextType>({
@@ -47,7 +47,6 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
     const [conversations, setConversations] = useState<ChatData[]>([]);
     const [users, setUsers] = useState<Record<string, UserData>>({});
     const [onlineStatus, setOnlineStatus] = useState<Record<string, boolean>>({});
-    const [typingStatus, setTypingStatus] = useState<Record<string, boolean>>({});
 
     useEffect(() => {
         if (!currentUser) {
@@ -128,7 +127,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
         conversations,
         users,
         onlineStatus,
-        typingStatus,
+        typingStatus: {}, // Placeholder if components still depend on the type
     };
 
     return (

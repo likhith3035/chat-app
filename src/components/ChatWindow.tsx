@@ -14,7 +14,7 @@ interface ChatWindowProps {
 
 export default function ChatWindow({ chatId, onBack }: ChatWindowProps) {
     const { currentUser } = useAuth();
-    const { conversations, users, onlineStatus, typingStatus } = useChat();
+    const { conversations, users, onlineStatus } = useChat();
 
     const [messages, setMessages] = useState<any[]>([]);
     const [inputText, setInputText] = useState('');
@@ -198,7 +198,6 @@ export default function ChatWindow({ chatId, onBack }: ChatWindowProps) {
     };
 
     // Typing indicator rendering
-    const isTargetTyping = typingStatus[chatId]; // The generic ChatContext doesn't map specifics tightly yet, so we will do a direct RTDB check here for now or rely on the context when expanded. Let's do a direct RTDB listener here for simplicity and accuracy.
 
     const [typers, setTypers] = useState<string[]>([]);
     useEffect(() => {

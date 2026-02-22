@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect } from 'react';
 
 const EMOJI_CATEGORIES: Record<string, string[]> = {
     'Smileys': ['😀', '😁', '😂', '🤣', '😃', '😄', '😅', '😆', '😉', '😊', '😋', '😎', '😍', '🤩', '😘', '😗', '😙', '😚', '🙂', '🤗', '🤔', '🤫', '🤭', '🤐', '😐', '😑', '😶', '😏', '😒', '🙄', '😬', '😮‍💨', '🤥', '😌', '😔', '😪', '🤤', '😴', '😷', '🤒', '🤕', '🤢', '🤮', '🥵', '🥶', '🥴', '😵', '🤯', '🤠', '🥳', '🥸', '😎', '🤓', '🧐'],
@@ -41,8 +41,8 @@ export default function EmojiPicker({ onSelect, onClose }: EmojiPickerProps) {
                         key={cat}
                         onClick={() => setActiveCategory(cat)}
                         className={`px-2 py-1 text-xs rounded-md font-medium transition-colors whitespace-nowrap ${activeCategory === cat
-                                ? 'bg-blue-100 text-blue-700'
-                                : 'text-gray-500 hover:bg-gray-100'
+                            ? 'bg-blue-100 text-blue-700'
+                            : 'text-gray-500 hover:bg-gray-100'
                             }`}
                     >
                         {cat}

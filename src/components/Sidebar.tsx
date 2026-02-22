@@ -1,10 +1,9 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useChat } from '../context/ChatContext';
 import { auth, rtdb, ADMIN_EMAILS } from '../firebase';
 import { remove, ref } from 'firebase/database';
 import { useNavigate } from 'react-router-dom';
-import { doc, getDoc } from 'firebase/firestore';
 
 import NewChatModal from './modals/NewChatModal';
 import NewRoomModal from './modals/NewRoomModal';

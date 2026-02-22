@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useAuth } from '../../context/AuthContext';
 import { db, CHATS_COL } from '../../firebase';
 import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
