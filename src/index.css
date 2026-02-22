@@ -1,0 +1,258 @@
+@import "tailwindcss";
+
+/* Enable dark mode via class strategy */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* Simple spinner for loading */
+.spinner {
+  border: 4px solid rgba(0, 0, 0, 0.1);
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  border-left-color: #2563eb;
+  animation: spin 1s ease infinite;
+}
+
+@keyframes spin {
+  0% {
+    transform: rotate(0deg);
+  }
+
+  100% {
+    transform: rotate(360deg);
+  }
+}
+
+/* Custom scrollbar for sidebar (Light theme) */
+#conversations-list::-webkit-scrollbar {
+  width: 6px;
+}
+
+#conversations-list::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+/* gray-100 */
+#conversations-list::-webkit-scrollbar-thumb {
+  background: #d1d5db;
+  border-radius: 3px;
+}
+
+/* gray-300 */
+#conversations-list::-webkit-scrollbar-thumb:hover {
+  background: #9ca3af;
+}
+
+/* gray-400 */
+
+/* Custom scrollbar for chat area */
+#messages-container {
+  scroll-behavior: smooth;
+}
+
+#messages-container::-webkit-scrollbar {
+  width: 6px;
+}
+
+#messages-container::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+#messages-container::-webkit-scrollbar-thumb {
+  background: #c5c5c5;
+  border-radius: 3px;
+}
+
+#messages-container::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+body {
+  background-color: #f0f2f5;
+  font-family: "Trebuchet MS", "Lucida Sans Unicode", "Lucida Grande", "Lucida Sans", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  margin: 0;
+  padding: 0;
+}
+
+#root {
+  width: 100%;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+}
+
+/* Online status indicator */
+.online-indicator {
+  width: 10px;
+  height: 10px;
+  background-color: #10B981;
+  /* Green-500 */
+  border-radius: 50%;
+  border: 2px solid white;
+  position: absolute;
+  bottom: 0;
+  right: 0;
+}
+
+/* --- UPDATED: Highlight active chat (Messenger-like) --- */
+.conversation-item.active {
+  background-color: #DBEAFE;
+  /* blue-100 */
+  border-left: none;
+  /* Remove border */
+}
+
+/* Make text bold when active */
+.conversation-item.active p.font-semibold {
+  font-weight: 700;
+}
+
+/* On mobile, we don't want the persistent active state */
+@media (max-width: 767px) {
+  .conversation-item.active {
+    background-color: inherit;
+    border-left: none;
+  }
+
+  .conversation-item:active {
+    background-color: #DBEAFE;
+    /* Show active only on tap */
+  }
+}
+
+
+/* Style for hidden chats in the list (Light theme) */
+.conversation-item.is-hidden {
+  opacity: 0.8;
+  background-color: #f3f4f6;
+  /* gray-100 */
+}
+
+.conversation-item.is-hidden:hover {
+  background-color: #e5e7eb;
+  /* gray-200 */
+}
+
+.conversation-item.is-hidden.active {
+  background-color: #e5e7eb;
+  /* gray-200 */
+  border-left: none;
+}
+
+/* NEW: Cleaner Message Bubbles */
+.message-bubble {
+  max-width: 70%;
+}
+
+/* Style for chat images */
+.chat-image {
+  max-width: 250px;
+  max-height: 250px;
+  border-radius: 1rem;
+  object-fit: cover;
+  cursor: pointer;
+  transition: filter 0.2s ease;
+}
+
+.chat-image:hover {
+  filter: brightness(0.9);
+}
+
+/* Style for upload spinner inside button */
+#send-btn.uploading .spinner-small {
+  display: block;
+}
+
+#send-btn:not(.uploading) .spinner-small {
+  display: none;
+}
+
+#send-btn.uploading span {
+  display: none;
+}
+
+#send-btn span {
+  display: block;
+}
+
+.spinner-small {
+  border: 3px solid rgba(255, 255, 255, 0.3);
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border-left-color: #fff;
+  animation: spin 1s ease infinite;
+}
+
+/* --- UPDATED: Toggle Switch Styles --- */
+/* Default state (lighter gray) */
+.toggle-checkbox+.toggle-bg {
+  background-color: #D1D5DB;
+  /* gray-300 */
+}
+
+/* Checked state (blue for online) */
+.toggle-checkbox:checked+.toggle-bg {
+  background-color: #2563eb;
+  /* Blue 600 */
+  border-color: #2563eb;
+}
+
+.toggle-checkbox:checked+.toggle-bg+.toggle-dot {
+  transform: translateX(1.25rem);
+  /* 20px */
+}
+
+/* Yellow for hidden toggle */
+#hidden-toggle:checked+.toggle-bg {
+  background-color: #f59e0b;
+  /* Amber 500 */
+  border-color: #f59e0b;
+}
+
+/* *** NEW: Custom scrollbar for light-background modals *** */
+.custom-scrollbar-light::-webkit-scrollbar {
+  width: 6px;
+}
+
+.custom-scrollbar-light::-webkit-scrollbar-track {
+  background: #f1f1f1;
+}
+
+.custom-scrollbar-light::-webkit-scrollbar-thumb {
+  background: #c5c5c5;
+  border-radius: 3px;
+}
+
+.custom-scrollbar-light::-webkit-scrollbar-thumb:hover {
+  background: #a8a8a8;
+}
+
+/* Chat wallpaper - subtle pattern background */
+.chat-wallpaper {
+  background-color: #f0f2f5;
+  background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%23d1d5db' fill-opacity='0.25'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+}
+
+:where(.dark) .chat-wallpaper {
+  background-color: #111827;
+  background-image: url("data:image/svg+xml,%3Csvg width='60' height='60' viewBox='0 0 60 60' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='none' fill-rule='evenodd'%3E%3Cg fill='%234b5563' fill-opacity='0.15'%3E%3Cpath d='M36 34v-4h-2v4h-4v2h4v4h2v-4h4v-2h-4zm0-30V0h-2v4h-4v2h4v4h2V6h4V4h-4zM6 34v-4H4v4H0v2h4v4h2v-4h4v-2H6zM6 4V0H4v4H0v2h4v4h2V6h4V4H6z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+}
+
+/* Message entrance animation */
+.msg-entrance {
+  animation: msgSlideIn 0.3s ease-out both;
+}
+
+@keyframes msgSlideIn {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
