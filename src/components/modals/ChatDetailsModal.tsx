@@ -11,7 +11,7 @@ interface ChatDetailsModalProps {
     onUpdateNickname: (uid: string, nickname: string) => void;
 }
 
-export default function ChatDetailsModal({ onClose, chatId, chatData, onSelectTheme, onUpdateNickname }: ChatDetailsModalProps) {
+export default function ChatDetailsModal({ onClose, chatData, onSelectTheme, onUpdateNickname }: ChatDetailsModalProps) {
     const { currentUser } = useAuth();
     const { users } = useChat();
     const [activeTab, setActiveTab] = useState<'theme' | 'members'>('theme');
