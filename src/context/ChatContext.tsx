@@ -11,6 +11,8 @@ interface UserData {
     avatarUrl?: string;
     isBanned?: boolean;
     lastSeen?: any;
+    customStatus?: string;
+    chatWallpaper?: string;
 }
 
 interface ChatData {
@@ -22,6 +24,8 @@ interface ChatData {
     lastSenderId?: string;
     groupName?: string;
     groupAvatar?: string;
+    theme?: string;
+    nicknames?: Record<string, string>;
 }
 
 interface ChatContextType {
@@ -99,6 +103,7 @@ export function ChatProvider({ children }: { children: React.ReactNode }) {
                     email: data.email || '',
                     lastSeen: data.lastSeen || null,
                     isBanned: data.isBanned || false,
+                    customStatus: data.customStatus || ''
                 } as UserData;
             });
             setUsers(usersMap);

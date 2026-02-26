@@ -113,12 +113,12 @@ export default function NewChatModal({ onClose, onChatCreated }: NewChatModalPro
 
     return (
         <div className="fixed inset-0 bg-gray-600/75 dark:bg-black/60 flex items-center justify-center z-40 p-4">
-            <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-md p-6">
-                <h2 className="text-xl font-semibold mb-4 text-gray-800 dark:text-gray-100">New Chat</h2>
+            <div className="bg-white dark:bg-slate-900 border border-transparent dark:border-white/10 rounded-xl shadow-2xl w-full max-w-md p-6">
+                <h2 className="text-xl font-semibold mb-4 text-gray-800 dark:text-slate-100">New Chat</h2>
 
                 {/* Search input */}
                 <div className="relative mb-3">
-                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-slate-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                         <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
                     </svg>
                     <input
@@ -126,7 +126,7 @@ export default function NewChatModal({ onClose, onChatCreated }: NewChatModalPro
                         value={searchQuery}
                         onChange={(e) => setSearchQuery(e.target.value)}
                         placeholder="Search by name or email..."
-                        className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 text-gray-800 dark:text-gray-100 bg-white dark:bg-gray-700 text-sm"
+                        className="w-full pl-10 pr-4 py-3 border border-gray-300 dark:border-slate-700 rounded-lg focus:ring-blue-500 focus:border-blue-500 text-gray-800 dark:text-slate-100 bg-white dark:bg-slate-800 text-sm placeholder-gray-400 dark:placeholder-slate-500"
                         autoFocus
                     />
                 </div>
@@ -147,9 +147,9 @@ export default function NewChatModal({ onClose, onChatCreated }: NewChatModalPro
                 )}
 
                 {/* User list */}
-                <div className="max-h-60 overflow-y-auto mb-4 border border-gray-200 dark:border-gray-600 rounded-lg">
+                <div className="max-h-60 overflow-y-auto mb-4 border border-gray-200 dark:border-white/10 rounded-lg shadow-inner dark:bg-slate-900 custom-scrollbar-light dark:custom-scrollbar-dark">
                     {fetchingUsers ? (
-                        <div className="p-4 text-center text-gray-500 dark:text-gray-400 text-sm">Loading users...</div>
+                        <div className="p-4 text-center text-gray-500 dark:text-slate-400 text-sm">Loading users...</div>
                     ) : filteredUsers.length === 0 ? (
                         <div className="p-4 text-center text-gray-500 dark:text-gray-400 text-sm">
                             {searchQuery ? `No users found for "${searchQuery}"` : 'No users available'}
@@ -159,7 +159,7 @@ export default function NewChatModal({ onClose, onChatCreated }: NewChatModalPro
                             <div
                                 key={user.uid}
                                 onClick={() => toggleUserSelection(user.uid)}
-                                className={`flex items-center p-3 cursor-pointer border-b border-gray-100 dark:border-gray-700 last:border-0 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors ${selectedUsers.has(user.uid) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
+                                className={`flex items-center p-3 cursor-pointer border-b border-gray-100 dark:border-slate-800 last:border-0 hover:bg-gray-50 dark:hover:bg-slate-800 transition-colors ${selectedUsers.has(user.uid) ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
                             >
                                 <img
                                     className="h-10 w-10 rounded-full object-cover flex-shrink-0"
@@ -167,8 +167,8 @@ export default function NewChatModal({ onClose, onChatCreated }: NewChatModalPro
                                     alt="Avatar"
                                 />
                                 <div className="ml-3 flex-grow min-w-0">
-                                    <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{user.name || 'Unknown'}</p>
-                                    <p className="text-xs text-gray-500 dark:text-gray-400 truncate">{user.email}</p>
+                                    <p className="text-sm font-medium text-gray-900 dark:text-slate-100 truncate">{user.name || 'Unknown'}</p>
+                                    <p className="text-xs text-gray-500 dark:text-slate-400 truncate">{user.email}</p>
                                 </div>
                                 <div className="flex-shrink-0 ml-2">
                                     {selectedUsers.has(user.uid) ? (
@@ -192,16 +192,16 @@ export default function NewChatModal({ onClose, onChatCreated }: NewChatModalPro
                         placeholder="Group Name (optional)"
                         value={groupName}
                         onChange={(e) => setGroupName(e.target.value)}
-                        className="w-full p-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 mb-2 text-gray-800 dark:text-gray-100 bg-white dark:bg-gray-700"
+                        className="w-full p-3 border border-gray-300 dark:border-slate-700 rounded-lg focus:ring-blue-500 focus:border-blue-500 mb-2 text-gray-800 dark:text-slate-100 bg-white dark:bg-slate-800 placeholder-gray-400 dark:placeholder-slate-500"
                     />
                 )}
 
-                <p className={`text-xs text-gray-500 dark:text-gray-400 mb-4 ${!isGroup ? 'hidden' : ''}`}>
+                <p className={`text-xs text-gray-500 dark:text-slate-400 mb-4 ${!isGroup ? 'hidden' : ''}`}>
                     Selecting multiple users creates a group chat.
                 </p>
 
                 <div className="flex justify-end space-x-3">
-                    <button onClick={onClose} className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
+                    <button onClick={onClose} className="px-4 py-2 text-gray-600 dark:text-slate-300 hover:bg-gray-100 dark:hover:bg-slate-800 rounded-lg transition-colors">
                         Cancel
                     </button>
                     <button

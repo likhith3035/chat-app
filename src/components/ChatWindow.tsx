@@ -1,11 +1,15 @@
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useChat } from '../context/ChatContext';
-import { db, rtdb, CHATS_COL } from '../firebase';
-import { collection, query, orderBy, limit, onSnapshot, addDoc, serverTimestamp, setDoc, doc, deleteDoc, getDocs } from 'firebase/firestore';
-import { ref, set, remove, onValue } from 'firebase/database';
+import { collection, query, orderBy, limit, onSnapshot, addDoc, serverTimestamp, setDoc, doc, deleteDoc, getDocs, updateDoc } from 'firebase/firestore';
+import { ref as dbRef, set, remove, onValue } from 'firebase/database';
+import { ref as storageRef, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { db, rtdb, storage, CHATS_COL } from '../firebase';
 import MessageBubble from './MessageBubble';
 import EmojiPicker from './EmojiPicker';
+import ForwardModal from './modals/ForwardModal';
+import ChatDetailsModal from './modals/ChatDetailsModal';
+import { getThemeGradient } from '../utils/themes';
 
 interface ChatWindowProps {
     chatId: string;
@@ -24,8 +28,22 @@ export default function ChatWindow({ chatId, onBack }: ChatWindowProps) {
     const [showSearch, setShowSearch] = useState(false);
     const [replyTo, setReplyTo] = useState<any>(null);
     const [forwardMsg, setForwardMsg] = useState<any>(null);
+    const [editingMsg, setEditingMsg] = useState<any>(null);
+    const [showScrollFab, setShowScrollFab] = useState(false);
+    const [isDragging, setIsDragging] = useState(false);
+    const [isDetailsModalOpen, setIsDetailsModalOpen] = useState(false);
+    const [globalTyping, setGlobalTyping] = useState<Record<string, string[]>>({});
+
+    // Voice Message State
+    const [isRecording, setIsRecording] = useState(false);
+    const [recordingDuration, setRecordingDuration] = useState(0);
+    const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+    const audioChunksRef = useRef<Blob[]>([]);
+    const recordingTimerRef = useRef<any>(null);
 
     const messagesEndRef = useRef<HTMLDivElement>(null);
+    const messagesContainerRef = useRef<HTMLDivElement>(null);
+    const textareaRef = useRef<HTMLTextAreaElement>(null);
     const typingTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const prevMsgCountRef = useRef(0);
 
@@ -86,7 +104,7 @@ export default function ChatWindow({ chatId, onBack }: ChatWindowProps) {
     // Typing indicator - broadcast
     const broadcastTyping = (isTyping: boolean) => {
         if (!currentUser || !chatId) return;
-        const typRef = ref(rtdb, `/typing/${chatId}/${currentUser.uid}`);
+        const typRef = dbRef(rtdb, `/typing/${chatId}/${currentUser.uid}`);
         if (isTyping) {
             set(typRef, { isTyping: true });
         } else {
@@ -94,11 +112,29 @@ export default function ChatWindow({ chatId, onBack }: ChatWindowProps) {
         }
     };
 
-    const handleInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
         setInputText(e.target.value);
+
+        // Auto-resize logic
+        if (textareaRef.current) {
+            textareaRef.current.style.height = 'auto';
+            textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`;
+        }
+
         broadcastTyping(true);
         if (typingTimeoutRef.current) clearTimeout(typingTimeoutRef.current);
         typingTimeoutRef.current = setTimeout(() => broadcastTyping(false), 2000);
+    };
+
+    const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+            e.preventDefault();
+
+            // Create a synthetic event or just call the logic since form submit isn't strictly necessary
+            if (inputText.trim()) {
+                handleSendMessage(e as unknown as React.FormEvent);
+            }
+        }
     };
 
     // Clean up typing on unmount
@@ -124,20 +160,61 @@ export default function ChatWindow({ chatId, onBack }: ChatWindowProps) {
             snapshot.forEach(doc => {
                 msgs.push({ id: doc.id, ...doc.data() });
             });
+
+            // Check if we were already near the bottom before adding new messages
+            const container = messagesContainerRef.current;
+            const isNearBottom = container ? (container.scrollHeight - container.scrollTop - container.clientHeight < 100) : true;
+
             setMessages(msgs);
             setLoading(false);
 
-            // Auto-scroll to bottom
-            setTimeout(() => {
-                messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-            }, 100);
+            // Auto-scroll to bottom if we were already near it, or on initial load
+            if (isNearBottom || msgs.length === snapshot.size) {
+                setTimeout(() => {
+                    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+                }, 100);
+            } else if (msgs.length > messages.length) {
+                // if new message arrived and we are scrolled up, show the fab right away
+                setShowScrollFab(true);
+            }
         });
 
-        return () => unsub();
+        // Listen for global typing changes to render the new animated typing bubble
+        const typingRef = dbRef(rtdb, `/typing`);
+        const unsubTyping = onValue(typingRef, (snapshot) => {
+            const data = snapshot.val() || {};
+            const newGlobal: Record<string, string[]> = {};
+            Object.keys(data).forEach(cId => {
+                const chatTypers = data[cId];
+                newGlobal[cId] = Object.keys(chatTypers).filter(uid => uid !== currentUser.uid && chatTypers[uid].isTyping);
+            });
+            setGlobalTyping(newGlobal);
+        });
+
+
+        return () => {
+            unsub();
+            unsubTyping();
+        };
     }, [chatId, currentUser]);
+
+    const handleScroll = () => {
+        if (!messagesContainerRef.current) return;
+        const { scrollTop, scrollHeight, clientHeight } = messagesContainerRef.current;
+        const isNearBottom = scrollHeight - scrollTop - clientHeight < 150;
+        setShowScrollFab(!isNearBottom);
+    };
+
+    const scrollToBottom = () => {
+        messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    };
 
     let chatName = 'Chat';
     let avatarUrl = 'https://ui-avatars.com/api/?name=Chat&background=random';
+
+    const getDisplayName = (uid: string, defaultName: string) => {
+        return chatData?.nicknames?.[uid] || defaultName;
+    };
 
     if (chatData) {
         if (chatData.type === 'group') {
@@ -146,8 +223,8 @@ export default function ChatWindow({ chatId, onBack }: ChatWindowProps) {
         } else {
             const partnerId = chatData.participants.find((uid: string) => uid !== currentUser?.uid);
             const partnerData = partnerId ? users[partnerId] : null;
-            if (partnerData) {
-                chatName = partnerData.name || 'User';
+            if (partnerData && partnerId) {
+                chatName = getDisplayName(partnerId, partnerData.name || 'User');
                 avatarUrl = partnerData.avatarUrl || `https://ui-avatars.com/api/?name=${chatName}&background=random`;
             }
         }
@@ -163,6 +240,22 @@ export default function ChatWindow({ chatId, onBack }: ChatWindowProps) {
         try {
             const chatDocRef = doc(db, CHATS_COL, chatId);
             const messagesColRef = collection(chatDocRef, 'messages');
+
+            // Reset textarea height instantly
+            if (textareaRef.current) {
+                textareaRef.current.style.height = 'auto';
+            }
+
+            if (editingMsg) {
+                const msgRef = doc(db, CHATS_COL, chatId, 'messages', editingMsg.id);
+                await updateDoc(msgRef, {
+                    text: text,
+                    editedAt: serverTimestamp()
+                });
+                setEditingMsg(null);
+                broadcastTyping(false);
+                return;
+            }
 
             const msgData: any = {
                 senderId: currentUser.uid,
@@ -197,45 +290,227 @@ export default function ChatWindow({ chatId, onBack }: ChatWindowProps) {
         }
     };
 
-    // Typing indicator rendering
+    // Drag and Drop Logic
+    const handleDragEnter = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.dataTransfer.items && e.dataTransfer.items.length > 0) {
+            setIsDragging(true);
+        }
+    };
 
-    const [typers, setTypers] = useState<string[]>([]);
-    useEffect(() => {
-        if (!chatId || !currentUser) return;
-        const typingRef = ref(rtdb, `/typing/${chatId}`);
-        const unsub = onValue(typingRef, (snapshot) => {
-            const data = snapshot.val() || {};
-            const activeTypers = Object.keys(data).filter(uid => uid !== currentUser.uid && data[uid].isTyping);
-            setTypers(activeTypers);
-        });
-        return () => unsub();
-    }, [chatId, currentUser]);
+    const handleDragLeave = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(false);
+    };
 
-    let typingIndicatorText = '';
-    if (typers.length === 1) {
-        const typerName = users[typers[0]]?.name || 'Someone';
-        typingIndicatorText = `${typerName} is typing...`;
-    } else if (typers.length > 1) {
-        typingIndicatorText = 'Several people are typing...';
-    }
+    const handleDragOver = (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!isDragging) setIsDragging(true);
+    };
+
+    const handleQuoteClick = (msgId: string) => {
+        const el = document.getElementById(`msg-${msgId}`);
+        if (el) {
+            el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            el.classList.add('bg-yellow-100', 'dark:bg-yellow-500/20', 'transition-colors', 'duration-500', 'rounded-xl');
+            setTimeout(() => {
+                el.classList.remove('bg-yellow-100', 'dark:bg-yellow-500/20');
+            }, 2000);
+        }
+    };
+
+    const handlePinMessage = async (msg: any) => {
+        if (!chatId) return;
+        try {
+            await updateDoc(doc(db, CHATS_COL, chatId), {
+                pinnedMessage: {
+                    id: msg.id,
+                    text: msg.text || 'Message',
+                    senderName: users[msg.senderId]?.name || 'User'
+                }
+            });
+        } catch (error) {
+            console.error('Error pinning message:', error);
+        }
+    };
+
+    const startRecording = async () => {
+        if (!currentUser) return;
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+            mediaRecorderRef.current = new MediaRecorder(stream);
+            audioChunksRef.current = [];
+
+            mediaRecorderRef.current.ondataavailable = (e) => {
+                if (e.data.size > 0) audioChunksRef.current.push(e.data);
+            };
+
+            mediaRecorderRef.current.onstop = async () => {
+                const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+                stream.getTracks().forEach(track => track.stop());
+
+                if (recordingDuration < 1) return; // Too short
+
+                try {
+                    const audioRef = storageRef(storage, `audios/${Date.now()}_${currentUser.uid}.webm`);
+                    await uploadBytes(audioRef, audioBlob);
+                    const url = await getDownloadURL(audioRef);
+
+                    const msgData: any = {
+                        senderId: currentUser.uid,
+                        audioUrl: url,
+                        timestamp: serverTimestamp(),
+                        readBy: [currentUser.uid]
+                    };
+                    if (replyTo) {
+                        msgData.replyTo = {
+                            id: replyTo.id,
+                            text: replyTo.text || 'Voice Message',
+                            senderId: replyTo.senderId,
+                            senderName: users[replyTo.senderId]?.name || 'User'
+                        };
+                    }
+                    await addDoc(collection(db, CHATS_COL, chatId, 'messages'), msgData);
+
+                    // Update chat last message
+                    await updateDoc(doc(db, CHATS_COL, chatId), {
+                        lastMessage: '🎤 Voice Message',
+                        lastMessageType: 'audio',
+                        lastMessageTime: serverTimestamp(),
+                        lastSenderId: currentUser.uid
+                    });
+
+                    setReplyTo(null);
+                    scrollToBottom();
+                } catch (error) {
+                    console.error("Error uploading audio:", error);
+                    alert("Failed to send voice message.");
+                }
+            };
+
+            mediaRecorderRef.current.start();
+            setIsRecording(true);
+            setRecordingDuration(0);
+            recordingTimerRef.current = setInterval(() => {
+                setRecordingDuration(prev => prev + 1);
+            }, 1000);
+
+        } catch (err) {
+            console.error("Microphone access denied:", err);
+            alert("Microphone access is required to send voice messages.");
+        }
+    };
+
+    const stopRecording = () => {
+        if (mediaRecorderRef.current && isRecording) {
+            mediaRecorderRef.current.stop();
+            setIsRecording(false);
+            if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+        }
+    };
+
+    const cancelRecording = () => {
+        if (mediaRecorderRef.current && isRecording) {
+            // override onstop so it doesn't upload
+            mediaRecorderRef.current.onstop = () => {
+                mediaRecorderRef.current?.stream.getTracks().forEach(track => track.stop());
+            };
+            mediaRecorderRef.current.stop();
+            setIsRecording(false);
+            if (recordingTimerRef.current) clearInterval(recordingTimerRef.current);
+            setRecordingDuration(0);
+        }
+    };
+
+    const formatDuration = (seconds: number) => {
+        const m = Math.floor(seconds / 60);
+        const s = seconds % 60;
+        return `${m}:${s < 10 ? '0' : ''}${s}`;
+    };
+
+    const handleDrop = async (e: React.DragEvent) => {
+        e.preventDefault();
+        e.stopPropagation();
+        setIsDragging(false);
+
+        const files = Array.from(e.dataTransfer.files);
+        const imageFile = files.find(f => f.type.startsWith('image/'));
+
+        if (imageFile && currentUser && chatId) {
+            try {
+                // Upload image
+                const fileRef = storageRef(storage, `chat_images/${chatId}/${Date.now()}_${imageFile.name}`);
+                await uploadBytes(fileRef, imageFile);
+                const imageUrl = await getDownloadURL(fileRef);
+
+                // Send message with image
+                const chatDocRef = doc(db, CHATS_COL, chatId);
+                const messagesColRef = collection(chatDocRef, 'messages');
+
+                await addDoc(messagesColRef, {
+                    senderId: currentUser.uid,
+                    text: '',
+                    imageUrl: imageUrl,
+                    timestamp: serverTimestamp(),
+                    readBy: [currentUser.uid],
+                });
+
+                await setDoc(chatDocRef, {
+                    lastMessage: 'Image',
+                    lastMessageType: 'image',
+                    lastUpdated: serverTimestamp(),
+                }, { merge: true });
+
+            } catch (err) {
+                console.error("Error uploading dragged image:", err);
+                alert("Failed to upload image.");
+            }
+        }
+    };
 
     return (
         <>
-            <div className="flex-grow flex flex-col h-full bg-white">
-                <div className="p-4 border-b border-gray-200 bg-white dark:bg-gray-900 dark:border-gray-700 shadow-sm flex items-center flex-shrink-0">
-                    <button onClick={onBack} title="Close Chat" className="p-1 rounded-full text-gray-600 dark:text-gray-300 hover:text-blue-600 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors mr-3">
+            <div
+                className="flex-grow flex flex-col h-full bg-white relative"
+                onDragEnter={handleDragEnter}
+                onDragOver={handleDragOver}
+                onDragLeave={handleDragLeave}
+                onDrop={handleDrop}
+            >
+                {/* Drag Overlay */}
+                {isDragging && (
+                    <div className="absolute inset-0 z-50 bg-blue-500/10 backdrop-blur-sm border-4 border-dashed border-blue-500 rounded-2xl m-4 flex items-center justify-center pointer-events-none">
+                        <div className="bg-white dark:bg-slate-800 p-8 rounded-2xl shadow-2xl flex flex-col items-center">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-16 w-16 text-blue-500 animate-bounce" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                <path strokeLinecap="round" strokeLinejoin="round" d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
+                            </svg>
+                            <h2 className="mt-4 text-2xl font-bold text-gray-800 dark:text-slate-100">Drop Image to Send</h2>
+                        </div>
+                    </div>
+                )}
+
+                <div className="p-4 border-b border-gray-200 bg-white dark:bg-slate-900 dark:border-white/5 shadow-sm flex items-center flex-shrink-0">
+                    <button onClick={onBack} title="Close Chat" className="p-1 rounded-full text-gray-600 dark:text-slate-400 hover:text-blue-600 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors mr-3">
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M10 19l-7-7m0 0l7-7m-7 7h18" />
                         </svg>
                     </button>
-                    <img className="h-10 w-10 rounded-full object-cover" src={avatarUrl} alt="Avatar" />
+                    <img className="h-10 w-10 rounded-full object-cover shadow-sm" src={avatarUrl} alt="Avatar" />
                     <div className="ml-3 flex-grow">
-                        <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100">{chatName}</h3>
+                        <h3 className="text-lg font-semibold text-gray-800 dark:text-slate-100">{chatName}</h3>
                         {chatData?.type !== 'group' && (() => {
                             const partnerId = chatData?.participants?.find((uid: string) => uid !== currentUser?.uid);
                             if (!partnerId) return null;
-                            const isOnline = onlineStatus[partnerId];
                             const partnerData = users[partnerId];
+
+                            if (partnerData?.customStatus) {
+                                return <p className="text-xs text-gray-500 dark:text-slate-400 truncate" title={partnerData.customStatus}>{partnerData.customStatus}</p>;
+                            }
+
+                            const isOnline = onlineStatus[partnerId];
                             const lastSeen = partnerData?.lastSeen;
                             if (isOnline) return <p className="text-xs text-green-500">Online</p>;
                             if (lastSeen) {
@@ -257,10 +532,19 @@ export default function ChatWindow({ chatId, onBack }: ChatWindowProps) {
                     <button
                         onClick={() => { setShowSearch(!showSearch); setSearchQuery(''); }}
                         title="Search Messages"
-                        className="p-2 rounded-full text-gray-500 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors ml-1"
+                        className="p-2 rounded-full text-gray-500 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors ml-1"
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z" />
+                        </svg>
+                    </button>
+                    <button
+                        onClick={() => setIsDetailsModalOpen(true)}
+                        title="Chat Details"
+                        className="p-2 rounded-full text-gray-500 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-800 transition-colors ml-1 border border-transparent dark:border-white/5 bg-gray-50 dark:bg-slate-800 shadow-sm"
+                    >
+                        <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                            <path strokeLinecap="round" strokeLinejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                         </svg>
                     </button>
                     <button
@@ -281,7 +565,7 @@ export default function ChatWindow({ chatId, onBack }: ChatWindowProps) {
                             }
                         }}
                         title="Delete Chat"
-                        className="p-2 rounded-full text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors ml-1"
+                        className="p-2 rounded-full text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-500/10 transition-colors ml-1"
                     >
                         <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                             <path strokeLinecap="round" strokeLinejoin="round" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
@@ -291,13 +575,13 @@ export default function ChatWindow({ chatId, onBack }: ChatWindowProps) {
 
                 {/* Search Bar */}
                 {showSearch && (
-                    <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex-shrink-0">
+                    <div className="px-4 py-2 border-b border-gray-200 dark:border-white/5 bg-gray-50 dark:bg-slate-900 flex-shrink-0">
                         <input
                             type="text"
                             value={searchQuery}
                             onChange={(e) => setSearchQuery(e.target.value)}
                             placeholder="Search messages..."
-                            className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-gray-700 text-gray-800 dark:text-gray-100"
+                            className="w-full px-3 py-2 text-sm border border-gray-300 dark:border-slate-700 rounded-lg focus:ring-blue-500 focus:border-blue-500 bg-white dark:bg-slate-800 dark:text-slate-100 placeholder-gray-400 dark:placeholder-slate-500"
                             autoFocus
                         />
                         {searchQuery && (
@@ -308,7 +592,17 @@ export default function ChatWindow({ chatId, onBack }: ChatWindowProps) {
                     </div>
                 )}
 
-                <div className="flex-grow p-4 overflow-y-auto flex flex-col h-full chat-wallpaper">
+                <div
+                    className="flex-grow p-4 overflow-y-auto flex flex-col h-full chat-wallpaper relative"
+                    style={{
+                        backgroundImage: currentUser && users[currentUser.uid]?.chatWallpaper?.startsWith('url') ? users[currentUser.uid].chatWallpaper : undefined,
+                        backgroundColor: currentUser && users[currentUser.uid]?.chatWallpaper?.startsWith('#') ? users[currentUser.uid].chatWallpaper : undefined,
+                        backgroundSize: 'cover',
+                        backgroundPosition: 'center',
+                    }}
+                    ref={messagesContainerRef}
+                    onScroll={handleScroll}
+                >
                     {loading ? (
                         <div className="flex flex-col space-y-4">
                             {[1, 2, 3, 4].map(i => (
@@ -321,10 +615,21 @@ export default function ChatWindow({ chatId, onBack }: ChatWindowProps) {
                         <>
                             {(() => {
                                 const displayMsgs = searchQuery
-                                    ? messages.filter(m => m.text?.toLowerCase().includes(searchQuery.toLowerCase()))
-                                    : messages;
+                                    ? messages.filter(m => !m.isDeleted && m.text?.toLowerCase().includes(searchQuery.toLowerCase()))
+                                    : messages.filter(m => !m.isDeleted);
+
+                                const participantCount = chatData?.participants?.length || 2;
+                                const lastReadMsg = [...displayMsgs].reverse().find(m =>
+                                    m.senderId === currentUser?.uid &&
+                                    (m.readBy && m.readBy.length >= participantCount)
+                                );
+                                const lastReadMsgId = lastReadMsg?.id;
+
                                 let lastDate = '';
                                 return displayMsgs.map((msg, idx) => {
+                                    const isFirstInGroup = idx === 0 || displayMsgs[idx - 1].senderId !== msg.senderId;
+                                    const isLastInGroup = idx === displayMsgs.length - 1 || displayMsgs[idx + 1].senderId !== msg.senderId;
+
                                     let dateSeparator = null;
                                     if (msg.timestamp) {
                                         const msgDate = new Date(msg.timestamp.seconds * 1000);
@@ -344,54 +649,123 @@ export default function ChatWindow({ chatId, onBack }: ChatWindowProps) {
                                         if (dateLabel !== lastDate) {
                                             lastDate = dateLabel;
                                             dateSeparator = (
-                                                <div key={`date-${idx}`} className="flex items-center justify-center my-4">
-                                                    <span className="px-4 py-1 bg-gray-200/80 dark:bg-gray-700/80 backdrop-blur-sm text-gray-600 dark:text-gray-300 text-xs rounded-full font-medium shadow-sm">
+                                                <div key={`date-${idx}`} className="flex items-center justify-center my-4 sticky top-2 z-20">
+                                                    <span className="px-4 py-1.5 bg-gray-200/90 dark:bg-slate-800/90 backdrop-blur-md text-gray-700 dark:text-slate-300 text-xs rounded-full font-semibold shadow-sm border border-white/20 dark:border-white/5">
                                                         {dateLabel}
                                                     </span>
                                                 </div>
                                             );
                                         }
                                     }
+
                                     return (
-                                        <div key={msg.id}>
+                                        <div key={msg.id} id={`msg-${msg.id}`} className="transition-colors duration-1000 -mx-2 px-2 py-1 rounded-xl relative hover:z-40">
                                             {dateSeparator}
-                                            <div className="msg-entrance" style={{ animationDelay: `${Math.min(idx * 30, 300)}ms` }}>
+                                            <div className="msg-entrance relative" style={{ animationDelay: `${Math.min(idx * 30, 300)}ms` }}>
                                                 <MessageBubble
                                                     message={msg}
                                                     isOwn={msg.senderId === currentUser?.uid}
-                                                    senderData={users[msg.senderId]}
+                                                    senderData={{
+                                                        ...users[msg.senderId],
+                                                        name: getDisplayName(msg.senderId, users[msg.senderId]?.name || 'User')
+                                                    }}
                                                     isGroup={chatData?.type === 'group'}
                                                     chatId={chatId}
                                                     currentUserId={currentUser?.uid || ''}
                                                     onReply={() => setReplyTo(msg)}
                                                     onForward={() => setForwardMsg(msg)}
-                                                    participantCount={chatData?.participants?.length || 2}
+                                                    onEdit={() => { setEditingMsg(msg); setInputText(msg.text || ''); textareaRef.current?.focus(); }}
+                                                    onPin={() => handlePinMessage(msg)}
+                                                    onQuoteClick={handleQuoteClick}
+                                                    searchQuery={searchQuery}
+                                                    isFirstInGroup={isFirstInGroup}
+                                                    isLastInGroup={isLastInGroup}
+                                                    isLastRead={msg.id === lastReadMsgId}
+                                                    themeGradient={getThemeGradient(chatData?.theme)}
                                                 />
                                             </div>
                                         </div>
                                     );
                                 });
                             })()}
-                            <div ref={messagesEndRef} />
+
+                            {/* Granular Typing Indicator */}
+                            {(() => {
+                                const chatTypers = globalTyping[chatId] || [];
+                                if (chatTypers.length === 0) return null;
+                                let typingText = 'typing...';
+                                if (chatData?.type === 'group') {
+                                    if (chatTypers.length === 1) {
+                                        const typerName = getDisplayName(chatTypers[0], users[chatTypers[0]]?.name || 'Someone').split(' ')[0];
+                                        typingText = `${typerName} is typing...`;
+                                    } else {
+                                        typingText = `${chatTypers.length} people are typing...`;
+                                    }
+                                }
+
+                                return (
+                                    <div className="flex justify-start animate-fade-in-up mt-2">
+                                        <div className="bg-white/80 dark:bg-slate-800/80 backdrop-blur-sm px-4 py-2 rounded-2xl rounded-bl-sm border border-gray-100 dark:border-white/5 flex items-center space-x-2 w-max max-w-[80%] shadow-sm">
+                                            <div className="flex space-x-1 items-center h-4">
+                                                <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }}></div>
+                                                <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }}></div>
+                                                <div className="w-1.5 h-1.5 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }}></div>
+                                            </div>
+                                            <span className="text-xs font-medium text-gray-500 dark:text-slate-400 italic">
+                                                {typingText}
+                                            </span>
+                                        </div>
+                                    </div>
+                                );
+                            })()}
+
+                            <div ref={messagesEndRef} className="h-4" />
                         </>
                     )}
                 </div>
 
-                <div className="h-6 px-4 text-sm text-gray-500 italic flex-shrink-0 bg-white">
-                    {typingIndicatorText}
+                <div className="relative">
+                    {/* Scroll to bottom FAB */}
+                    {showScrollFab && (
+                        <button
+                            onClick={scrollToBottom}
+                            className="absolute right-4 bottom-4 p-2 bg-white dark:bg-slate-800 text-gray-600 dark:text-slate-300 rounded-full shadow-lg border border-gray-200 dark:border-white/5 hover:bg-gray-50 dark:hover:bg-slate-700 transition-all z-10 flex items-center justify-center animate-bounce duration-300"
+                            style={{ animationDuration: '2s' }}
+                            title="Scroll to bottom"
+                        >
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 20 20" fill="currentColor">
+                                <path fillRule="evenodd" d="M14.707 12.293a1 1 0 010 1.414l-4 4a1 1 0 01-1.414 0l-4-4a1 1 0 111.414-1.414L9 14.586V3a1 1 0 012 0v11.586l2.293-2.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                            </svg>
+                        </button>
+                    )}
                 </div>
 
-                <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 flex-shrink-0 pb-6 md:pb-4">
-                    {/* Reply preview bar */}
-                    {replyTo && (
+                <div className="border-t border-gray-200 dark:border-white/5 bg-gray-50 dark:bg-slate-900 flex-shrink-0 pb-6 md:pb-4">
+                    {/* Editing / Reply preview bar */}
+                    {editingMsg && (
                         <div className="px-4 pt-2 flex items-center gap-2">
-                            <div className="flex-grow bg-blue-50 dark:bg-blue-900/30 border-l-4 border-blue-500 rounded px-3 py-2">
+                            <div className="flex-grow bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500 rounded px-3 py-2">
+                                <p className="text-xs text-blue-600 dark:text-blue-400 font-medium">
+                                    Editing Message
+                                </p>
+                                <p className="text-xs text-gray-600 dark:text-slate-300 truncate">{editingMsg.text}</p>
+                            </div>
+                            <button onClick={() => { setEditingMsg(null); setInputText(''); }} className="p-1 text-gray-400 hover:text-gray-600 dark:text-slate-500 dark:hover:text-slate-300">
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                                </svg>
+                            </button>
+                        </div>
+                    )}
+                    {replyTo && !editingMsg && (
+                        <div className="px-4 pt-2 flex items-center gap-2">
+                            <div className="flex-grow bg-blue-50 dark:bg-blue-900/20 border-l-4 border-blue-500 rounded px-3 py-2">
                                 <p className="text-xs text-blue-600 dark:text-blue-400 font-medium">
                                     Replying to {replyTo.senderId === currentUser?.uid ? 'yourself' : (users[replyTo.senderId]?.name || 'User')}
                                 </p>
-                                <p className="text-xs text-gray-600 dark:text-gray-300 truncate">{replyTo.text}</p>
+                                <p className="text-xs text-gray-600 dark:text-slate-300 truncate">{replyTo.text}</p>
                             </div>
-                            <button onClick={() => setReplyTo(null)} className="p-1 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200">
+                            <button onClick={() => setReplyTo(null)} className="p-1 text-gray-400 hover:text-gray-600 dark:text-slate-500 dark:hover:text-slate-300">
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
                                 </svg>
@@ -403,38 +777,68 @@ export default function ChatWindow({ chatId, onBack }: ChatWindowProps) {
                             <button
                                 type="button"
                                 onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-                                className="p-3 text-gray-500 hover:text-yellow-500 hover:bg-gray-100 rounded-lg transition-colors"
+                                className="p-3 text-gray-500 hover:text-yellow-500 hover:bg-gray-100 dark:hover:bg-slate-800 disabled:opacity-30 rounded-lg transition-colors"
                                 title="Emoji"
+                                disabled={isRecording}
                             >
                                 <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
                                     <path strokeLinecap="round" strokeLinejoin="round" d="M14.828 14.828a4 4 0 01-5.656 0M9 10h.01M15 10h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
                                 </svg>
                             </button>
-                            {showEmojiPicker && (
+                            {showEmojiPicker && !isRecording && (
                                 <EmojiPicker
                                     onSelect={(emoji) => setInputText(prev => prev + emoji)}
                                     onClose={() => setShowEmojiPicker(false)}
                                 />
                             )}
                         </div>
-                        <input
-                            type="text"
-                            value={inputText}
-                            onChange={handleInputChange}
-                            placeholder="Type your message..."
-                            className="flex-grow p-3 border border-gray-300 dark:border-gray-600 rounded-lg focus:ring-blue-500 focus:border-blue-500 text-gray-800 dark:text-gray-100 bg-white dark:bg-gray-700"
-                            required
-                            autoComplete="off"
-                        />
-                        <button
-                            type="submit"
-                            className="bg-blue-600 hover:bg-blue-700 text-white p-3 rounded-full transition-colors duration-200 flex-shrink-0"
-                            title="Send"
-                        >
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
-                                <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
-                            </svg>
-                        </button>
+
+                        {isRecording ? (
+                            <div className="flex-grow flex items-center justify-between bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-500/30 rounded-2xl px-4 py-2 h-[48px] animate-pulse">
+                                <div className="flex items-center gap-2 text-red-600 dark:text-red-400">
+                                    <div className="w-2 h-2 bg-red-500 rounded-full animate-ping"></div>
+                                    <span className="font-medium text-sm">Recording {formatDuration(recordingDuration)}</span>
+                                </div>
+                                <button type="button" onClick={cancelRecording} className="text-gray-500 hover:text-red-600 dark:text-slate-400 dark:hover:text-red-400 text-sm font-medium px-2">
+                                    Cancel
+                                </button>
+                            </div>
+                        ) : (
+                            <textarea
+                                ref={textareaRef}
+                                value={inputText}
+                                onChange={handleInputChange}
+                                onKeyDown={handleKeyDown}
+                                placeholder="Type a message..."
+                                className="flex-grow p-3 min-h-[48px] max-h-[120px] resize-none overflow-y-auto border border-gray-300 dark:border-transparent rounded-2xl focus:ring-2 focus:ring-blue-500/50 focus:border-blue-500 text-gray-800 dark:text-slate-100 bg-white dark:bg-black/30 placeholder-gray-400 dark:placeholder-slate-500 transition-all custom-scrollbar-light dark:custom-scrollbar-dark"
+                                style={{ height: '48px' }}
+                                required
+                            />
+                        )}
+
+                        {inputText.trim() || isRecording ? (
+                            <button
+                                type={isRecording ? "button" : "submit"}
+                                onClick={isRecording ? stopRecording : undefined}
+                                className="bg-blue-600 hover:bg-blue-700 self-end mb-1 text-white p-3 rounded-full transition-colors duration-200 flex-shrink-0 flex items-center justify-center w-12 h-12 shadow-sm"
+                                title={isRecording ? "Send Voice" : "Send Text"}
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" viewBox="0 0 24 24" fill="currentColor">
+                                    <path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z" />
+                                </svg>
+                            </button>
+                        ) : (
+                            <button
+                                type="button"
+                                onClick={startRecording}
+                                className="bg-gray-100 dark:bg-slate-800 text-gray-600 dark:text-slate-300 hover:bg-gray-200 dark:hover:bg-slate-700 self-end mb-1 p-3 rounded-full transition-colors duration-200 flex-shrink-0 flex items-center justify-center w-12 h-12 shadow-sm border border-transparent dark:border-white/5"
+                                title="Hold to record audio"
+                            >
+                                <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                    <path strokeLinecap="round" strokeLinejoin="round" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z" />
+                                </svg>
+                            </button>
+                        )}
                     </form>
                 </div>
             </div>
@@ -442,58 +846,42 @@ export default function ChatWindow({ chatId, onBack }: ChatWindowProps) {
             {/* Forward Message Modal */}
             {
                 forwardMsg && (
-                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-                        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-sm p-5">
-                            <h3 className="text-lg font-semibold text-gray-800 dark:text-gray-100 mb-3">Forward Message</h3>
-                            <p className="text-xs text-gray-500 dark:text-gray-400 mb-3 truncate bg-gray-100 dark:bg-gray-700 rounded p-2">"{forwardMsg.text}"</p>
-                            <div className="max-h-60 overflow-y-auto space-y-1">
-                                {conversations.filter(c => c.id !== chatId).map(chat => {
-                                    let name = 'Chat';
-                                    if (chat.type === 'group') {
-                                        name = chat.groupName || 'Group';
-                                    } else {
-                                        const pid = chat.participants.find((uid: string) => uid !== currentUser?.uid);
-                                        name = pid && users[pid] ? users[pid].name || 'User' : 'Chat';
-                                    }
-                                    return (
-                                        <button
-                                            key={chat.id}
-                                            onClick={async () => {
-                                                try {
-                                                    await addDoc(collection(db, CHATS_COL, chat.id, 'messages'), {
-                                                        senderId: currentUser?.uid,
-                                                        text: `↗️ Forwarded: ${forwardMsg.text}`,
-                                                        timestamp: serverTimestamp(),
-                                                        readBy: [currentUser?.uid],
-                                                    });
-                                                    await setDoc(doc(db, CHATS_COL, chat.id), {
-                                                        lastMessage: `↗️ Forwarded: ${forwardMsg.text?.substring(0, 50)}`,
-                                                        lastUpdated: serverTimestamp(),
-                                                    }, { merge: true });
-                                                    setForwardMsg(null);
-                                                } catch (err) {
-                                                    console.error('Error forwarding:', err);
-                                                    alert('Could not forward message.');
-                                                }
-                                            }}
-                                            className="w-full text-left px-3 py-2.5 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors flex items-center gap-3"
-                                        >
-                                            <div className="w-8 h-8 rounded-full bg-blue-500 flex items-center justify-center text-white text-xs font-bold flex-shrink-0">
-                                                {name.charAt(0).toUpperCase()}
-                                            </div>
-                                            <p className="text-sm text-gray-800 dark:text-gray-200 truncate">{name}</p>
-                                        </button>
-                                    );
-                                })}
-                                {conversations.filter(c => c.id !== chatId).length === 0 && (
-                                    <p className="text-sm text-gray-500 text-center py-4">No other chats to forward to</p>
-                                )}
-                            </div>
-                            <button onClick={() => setForwardMsg(null)} className="mt-3 w-full py-2 text-sm text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors">
-                                Cancel
-                            </button>
-                        </div>
-                    </div>
+                    <ForwardModal
+                        messageToForward={forwardMsg}
+                        onClose={() => setForwardMsg(null)}
+                    />
+                )
+            }
+
+            {/* Chat Details Modal */}
+            {
+                isDetailsModalOpen && (
+                    <ChatDetailsModal
+                        chatId={chatId}
+                        chatData={chatData}
+                        onClose={() => setIsDetailsModalOpen(false)}
+                        onSelectTheme={async (themeId) => {
+                            try {
+                                await updateDoc(doc(db, CHATS_COL, chatId), { theme: themeId });
+                            } catch (err) {
+                                console.error('Failed to change theme', err);
+                            }
+                        }}
+                        onUpdateNickname={async (uid, nickname) => {
+                            try {
+                                const currentNicknames = chatData?.nicknames || {};
+                                const updatedNicknames = { ...currentNicknames };
+                                if (nickname) {
+                                    updatedNicknames[uid] = nickname;
+                                } else {
+                                    delete updatedNicknames[uid]; // Remove nickname if empty
+                                }
+                                await updateDoc(doc(db, CHATS_COL, chatId), { nicknames: updatedNicknames });
+                            } catch (err) {
+                                console.error('Failed to update nickname', err);
+                            }
+                        }}
+                    />
                 )
             }
         </>

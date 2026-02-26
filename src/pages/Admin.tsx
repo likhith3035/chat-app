@@ -1,10 +1,12 @@
+/* eslint-disable @typescript-eslint/no-explicit-any */
+/* eslint-disable react-hooks/set-state-in-effect */
 import { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { db, rtdb, USERS_COL, CHATS_COL, APPEALS_COL, ADMIN_EMAILS } from '../firebase';
 import { sendPasswordResetEmail } from 'firebase/auth';
 import { auth as firebaseAuth } from '../firebase';
-import { collection, onSnapshot, query, orderBy, doc, updateDoc, deleteDoc, setDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, doc, updateDoc, deleteDoc, setDoc, getDocs, limit, writeBatch } from 'firebase/firestore';
 import { ref, onValue } from 'firebase/database';
 
 export default function Admin() {
@@ -25,6 +27,14 @@ export default function Admin() {
     const [chats, setChats] = useState<any[]>([]);
     const [appeals, setAppeals] = useState<any[]>([]);
 
+    // Search & Filter
+    const [searchTerm, setSearchTerm] = useState('');
+    const [statusFilter, setStatusFilter] = useState('All');
+
+    // Sorting
+    const [sortColumn, setSortColumn] = useState('name');
+    const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+
     // Modals
     const [editModalOpen, setEditModalOpen] = useState(false);
     const [editingUser, setEditingUser] = useState<any>(null);
@@ -37,6 +47,10 @@ export default function Admin() {
 
     const [removePhotoModalOpen, setRemovePhotoModalOpen] = useState(false);
     const [removingPhotoUser, setRemovingPhotoUser] = useState<any>(null);
+
+    const [inspectModalOpen, setInspectModalOpen] = useState(false);
+    const [inspectingChat, setInspectingChat] = useState<any>(null);
+    const [chatMessages, setChatMessages] = useState<any[]>([]);
 
     useEffect(() => {
         if (!currentUser) return;
@@ -104,6 +118,79 @@ export default function Admin() {
         }
     };
 
+    // Bulk Actions
+    const handleClearResolvedAppeals = async () => {
+        if (!window.confirm("Are you sure you want to delete all resolved appeals?")) return;
+        try {
+            const batch = writeBatch(db);
+            const resolvedAppeals = appeals.filter(a => a.status === 'resolved');
+            resolvedAppeals.forEach(a => {
+                batch.delete(doc(db, APPEALS_COL, a.id));
+            });
+            await batch.commit();
+            showMessage(`Cleared ${resolvedAppeals.length} resolved appeals.`, 'success');
+        } catch (err: any) {
+            showMessage(err.message, 'error');
+        }
+    };
+
+    const handleExportCSV = () => {
+        const headers = ["User ID,Name,Email,Mobile,Status\n"];
+        const rows = filteredAndSortedUsers.map(u =>
+            `"${u.uid}","${(u.name || '').replace(/"/g, '""')}","${u.email}","${u.mobile || ''}","${u.isBanned ? 'Banned' : 'Active'}"\n`
+        );
+        const csvContent = "data:text/csv;charset=utf-8," + headers.concat(rows).join("");
+        const encodedUri = encodeURI(csvContent);
+        const link = document.createElement("a");
+        link.setAttribute("href", encodedUri);
+        link.setAttribute("download", "users_export.csv");
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        showMessage("Exported users to CSV.", "success");
+    };
+
+    const handleInspectChat = async (chatId: string, chatName: string) => {
+        setInspectingChat({ id: chatId, name: chatName });
+        setInspectModalOpen(true);
+        setChatMessages([]);
+        try {
+            const q = query(collection(db, CHATS_COL, chatId, "messages"), orderBy("timestamp", "desc"), limit(50));
+            const snapshot = await getDocs(q);
+            const msgs: any[] = [];
+            snapshot.forEach(d => msgs.push({ id: d.id, ...d.data() }));
+            setChatMessages(msgs.reverse());
+        } catch (err: any) {
+            showMessage(err.message, 'error');
+        }
+    };
+
+    const handleSort = (column: string) => {
+        if (sortColumn === column) {
+            setSortDirection(sortDirection === 'asc' ? 'desc' : 'asc');
+        } else {
+            setSortColumn(column);
+            setSortDirection('asc');
+        }
+    };
+
+    // Derived states
+    const filteredAndSortedUsers = users.filter(u => {
+        const matchesSearch = (u.name?.toLowerCase().includes(searchTerm.toLowerCase()) || u.email?.toLowerCase().includes(searchTerm.toLowerCase()) || u.uid.includes(searchTerm));
+        const matchesStatus = statusFilter === 'All' ? true : statusFilter === 'Active' ? !u.isBanned : u.isBanned;
+        return matchesSearch && matchesStatus;
+    }).sort((a, b) => {
+        let valA = a[sortColumn] || '';
+        let valB = b[sortColumn] || '';
+        if (sortColumn === 'status') {
+            valA = a.isBanned ? 'Banned' : 'Active';
+            valB = b.isBanned ? 'Banned' : 'Active';
+        }
+        if (valA < valB) return sortDirection === 'asc' ? -1 : 1;
+        if (valA > valB) return sortDirection === 'asc' ? 1 : -1;
+        return 0;
+    });
+
     // Check state loading
     if (loading) {
         return (
@@ -128,16 +215,16 @@ export default function Admin() {
         <div className="bg-gray-100 min-h-screen">
             <nav className="bg-white shadow-md">
                 <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-                    <div className="flex justify-between h-16">
-                        <div className="flex items-center">
-                            <h1 className="text-2xl font-bold text-gray-800">L Chat Admin</h1>
-                            <button onClick={() => navigate('/chat')} className="ml-6 px-3 py-2 bg-blue-600 text-white text-sm rounded-md hover:bg-blue-700">
-                                &larr; Back to Dashboard
+                    <div className="flex flex-col sm:flex-row justify-between items-center py-3 sm:py-0 sm:h-16 gap-3 sm:gap-0">
+                        <div className="flex items-center justify-between w-full sm:w-auto">
+                            <h1 className="text-xl sm:text-2xl font-bold text-gray-800">L Chat Admin</h1>
+                            <button onClick={() => navigate('/chat')} className="ml-4 sm:ml-6 px-3 py-2 bg-blue-600 text-white text-xs sm:text-sm rounded-md hover:bg-blue-700">
+                                &larr; <span className="hidden sm:inline">Back</span><span className="hidden md:inline"> to Dashboard</span><span className="sm:hidden">Back</span>
                             </button>
                         </div>
-                        <div className="flex items-center">
-                            <p className="text-gray-600 mr-4">Logged in as <span className="font-medium">{currentUser?.email}</span></p>
-                            <button onClick={handleLogout} className="px-3 py-2 bg-red-500 text-white text-sm rounded-md hover:bg-red-600">Logout</button>
+                        <div className="flex items-center w-full sm:w-auto justify-end">
+                            <p className="hidden sm:block text-gray-600 mr-4 truncate flex-1 md:max-w-none text-sm md:text-base text-right">Logged in as <span className="font-medium">{currentUser?.email}</span></p>
+                            <button onClick={handleLogout} className="px-3 py-2 bg-red-500 text-white text-xs sm:text-sm rounded-md hover:bg-red-600">Logout</button>
                         </div>
                     </div>
                 </div>
@@ -188,7 +275,10 @@ export default function Admin() {
                 </div>
 
                 {/* Ban Appeals */}
-                <h2 className="text-2xl font-semibold text-gray-900 mb-4">Ban Appeals</h2>
+                <div className="flex justify-between items-center mb-4">
+                    <h2 className="text-2xl font-semibold text-gray-900">Ban Appeals</h2>
+                    <button onClick={handleClearResolvedAppeals} className="px-3 py-1 bg-gray-600 text-white rounded hover:bg-gray-700 text-sm">Clear Resolved</button>
+                </div>
                 <div className="bg-white shadow-xl rounded-lg overflow-x-auto mb-8">
                     <table className="min-w-full divide-y divide-gray-200">
                         <thead className="bg-gray-50">
@@ -213,7 +303,7 @@ export default function Admin() {
                                             <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-yellow-100 text-yellow-800">Pending</span>
                                         )}
                                     </td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium flex gap-3">
                                         {appeal.status === 'pending' && (
                                             <>
                                                 <button className="text-green-600 hover:text-green-900" onClick={async () => {
@@ -237,20 +327,31 @@ export default function Admin() {
                 </div>
 
                 {/* Users */}
-                <h2 className="text-2xl font-semibold text-gray-900 mb-4">User Management</h2>
+                <div className="flex flex-col md:flex-row justify-between items-center mb-4 gap-4 md:gap-0">
+                    <h2 className="text-2xl font-semibold text-gray-900">User Management</h2>
+                    <div className="flex flex-wrap gap-2 w-full md:w-auto">
+                        <input type="text" placeholder="Search users..." className="flex-1 md:flex-none px-3 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} />
+                        <select className="px-3 py-1 border border-gray-300 rounded text-sm focus:outline-none focus:ring-1 focus:ring-blue-500" value={statusFilter} onChange={e => setStatusFilter(e.target.value)}>
+                            <option value="All">All Status</option>
+                            <option value="Active">Active</option>
+                            <option value="Banned">Banned</option>
+                        </select>
+                        <button onClick={handleExportCSV} className="w-full sm:w-auto px-3 py-1 bg-green-600 text-white rounded hover:bg-green-700 text-sm font-medium">Export CSV</button>
+                    </div>
+                </div>
                 <div className="bg-white shadow-xl rounded-lg overflow-x-auto mb-8">
                     <table className="min-w-full divide-y divide-gray-200">
                         <thead className="bg-gray-50">
                             <tr>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">User</th>
+                                <th onClick={() => handleSort('name')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100">User {sortColumn === 'name' ? (sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Contact</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-                                <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">User ID</th>
+                                <th onClick={() => handleSort('status')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100">Status {sortColumn === 'status' ? (sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
+                                <th onClick={() => handleSort('uid')} className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase cursor-pointer hover:bg-gray-100">User ID {sortColumn === 'uid' ? (sortDirection === 'asc' ? '↑' : '↓') : ''}</th>
                                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
                             </tr>
                         </thead>
                         <tbody className="bg-white divide-y divide-gray-200">
-                            {users.map(u => (
+                            {filteredAndSortedUsers.map(u => (
                                 <tr key={u.uid} className="hover:bg-gray-50">
                                     <td className="px-6 py-4 whitespace-nowrap">
                                         <div className="flex items-center">
@@ -269,7 +370,7 @@ export default function Admin() {
                                             : <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-100 text-green-800">Active</span>}
                                     </td>
                                     <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-500 truncate max-w-[100px]">{u.uid}</td>
-                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium space-x-2">
+                                    <td className="px-6 py-4 whitespace-nowrap text-sm font-medium flex gap-3">
                                         <button className="text-blue-600 hover:text-blue-900" onClick={() => { setEditingUser(u); setEditModalOpen(true); }}>Edit</button>
                                         <button className="text-yellow-600 hover:text-yellow-900" onClick={() => handleResetPassword(u.email)}>Reset Pass</button>
                                         <button className="text-orange-600 hover:text-orange-900" onClick={() => { setRemovingPhotoUser(u); setRemovePhotoModalOpen(true); }}>Remove Photo</button>
@@ -318,7 +419,8 @@ export default function Admin() {
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-700">{chatType}</td>
                                         <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 truncate max-w-[200px]">{room.lastMessage || '...'}</td>
                                         <td className="px-6 py-4 whitespace-nowrap text-xs text-gray-500 truncate max-w-[100px]">{room.id}</td>
-                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium">
+                                        <td className="px-6 py-4 whitespace-nowrap text-sm font-medium flex gap-3">
+                                            <button className="text-blue-600 hover:text-blue-900" onClick={() => handleInspectChat(room.id, chatName)}>Inspect</button>
                                             <button className="text-red-600 hover:text-red-900" onClick={() => { setDeletingChat({ id: room.id, name: chatName }); setDeleteChatModalOpen(true); }}>Delete</button>
                                         </td>
                                     </tr>
@@ -357,7 +459,7 @@ export default function Admin() {
                                 <input type="email" className="mt-1 block w-full px-3 py-2 bg-gray-200 border border-gray-300 rounded-md text-gray-500 cursor-not-allowed"
                                     readOnly value={editingUser.email} />
                             </div>
-                            <div className="grid grid-cols-2 gap-4">
+                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700">Age</label>
                                     <input type="number" className="mt-1 block w-full px-3 py-2 bg-gray-100 border border-gray-300 rounded-md"
@@ -442,6 +544,35 @@ export default function Admin() {
                                     setRemovePhotoModalOpen(false);
                                 } catch (err: any) { showMessage(err.message, 'error') }
                             }} className="px-4 py-2 bg-orange-600 text-white rounded-md hover:bg-orange-700">Remove Photo</button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {inspectModalOpen && inspectingChat && (
+                <div className="fixed inset-0 bg-gray-600 bg-opacity-75 flex items-center justify-center z-30 p-4">
+                    <div className="bg-white rounded-lg shadow-2xl p-6 w-full max-w-2xl flex flex-col max-h-[90vh]">
+                        <div className="flex justify-between items-center mb-4">
+                            <h3 className="text-xl font-medium text-gray-900">Inspect Chat: {inspectingChat.name}</h3>
+                            <button onClick={() => setInspectModalOpen(false)} className="text-gray-500 hover:text-gray-700 text-2xl leading-none">&times;</button>
+                        </div>
+                        <div className="flex-1 overflow-y-auto bg-gray-50 p-4 rounded-md border border-gray-200 space-y-3">
+                            {chatMessages.length === 0 ? (
+                                <p className="text-center text-gray-500 py-4">No recent messages found.</p>
+                            ) : (
+                                chatMessages.map(msg => (
+                                    <div key={msg.id} className="bg-white p-3 rounded shadow-sm border border-gray-100 flex flex-col">
+                                        <div className="flex justify-between text-xs text-gray-500 mb-1">
+                                            <span className="font-semibold text-gray-700">{msg.senderName || msg.senderId}</span>
+                                            <span>{msg.timestamp ? new Date(msg.timestamp.seconds * 1000).toLocaleString() : ''}</span>
+                                        </div>
+                                        <p className="text-sm text-gray-800 break-words whitespace-pre-wrap">{msg.text || (msg.imageUrl ? '[Image Message]' : '')}</p>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+                        <div className="mt-4 flex justify-end">
+                            <button type="button" onClick={() => setInspectModalOpen(false)} className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700">Close</button>
                         </div>
                     </div>
                 </div>

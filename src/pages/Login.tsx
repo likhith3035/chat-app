@@ -29,7 +29,13 @@ export default function Login() {
     // Redirect if already logged in
     useEffect(() => {
         if (currentUser) {
-            navigate('/profile');
+            const pendingInvite = localStorage.getItem('pending_invite_uid');
+            if (pendingInvite) {
+                localStorage.removeItem('pending_invite_uid');
+                navigate(`/invite/${pendingInvite}`);
+            } else {
+                navigate('/profile');
+            }
         }
     }, [currentUser, navigate]);
 
