@@ -31,18 +31,18 @@ export default function EmojiPicker({ onSelect, onClose }: EmojiPickerProps) {
     return (
         <div
             ref={pickerRef}
-            className="absolute bottom-full mb-2 left-0 bg-white rounded-xl shadow-2xl border border-gray-200 w-80 z-50 overflow-hidden"
+            className="absolute bottom-full mb-2 left-0 bg-white dark:bg-slate-800 rounded-xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-gray-200 dark:border-slate-700 w-80 z-[100] overflow-hidden"
             style={{ animation: 'fadeInUp 0.15s ease-out' }}
         >
             {/* Category Tabs */}
-            <div className="flex border-b border-gray-100 px-1 py-1 gap-1 overflow-x-auto">
+            <div className="flex border-b border-gray-100 dark:border-slate-700 px-1 py-1 gap-1 overflow-x-auto custom-scrollbar-light dark:custom-scrollbar-dark">
                 {Object.keys(EMOJI_CATEGORIES).map(cat => (
                     <button
                         key={cat}
                         onClick={() => setActiveCategory(cat)}
                         className={`px-2 py-1 text-xs rounded-md font-medium transition-colors whitespace-nowrap ${activeCategory === cat
-                            ? 'bg-blue-100 text-blue-700'
-                            : 'text-gray-500 hover:bg-gray-100'
+                            ? 'bg-blue-100 text-blue-700 dark:bg-blue-500/20 dark:text-blue-400'
+                            : 'text-gray-500 dark:text-slate-400 hover:bg-gray-100 dark:hover:bg-slate-700/50'
                             }`}
                     >
                         {cat}
@@ -51,7 +51,7 @@ export default function EmojiPicker({ onSelect, onClose }: EmojiPickerProps) {
             </div>
 
             {/* Emoji Grid */}
-            <div className="p-2 grid grid-cols-8 gap-1 max-h-48 overflow-y-auto">
+            <div className="p-2 grid grid-cols-8 gap-1 max-h-48 overflow-y-auto custom-scrollbar-light dark:custom-scrollbar-dark">
                 {EMOJI_CATEGORIES[activeCategory].map((emoji, idx) => (
                     <button
                         key={idx}
@@ -59,7 +59,7 @@ export default function EmojiPicker({ onSelect, onClose }: EmojiPickerProps) {
                             onSelect(emoji);
                             onClose();
                         }}
-                        className="w-8 h-8 flex items-center justify-center text-xl hover:bg-gray-100 rounded-md transition-colors cursor-pointer"
+                        className="w-8 h-8 flex items-center justify-center text-xl hover:bg-gray-100 dark:hover:bg-slate-700 rounded-md transition-colors cursor-pointer"
                     >
                         {emoji}
                     </button>

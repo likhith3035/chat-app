@@ -48,8 +48,8 @@ export default function ProfileModal({ onClose }: ProfileModalProps) {
     if (!userData) return null;
 
     return (
-        <div className="fixed inset-0 bg-gray-600/75 dark:bg-black/60 flex items-center justify-center z-50 p-4" onClick={onClose}>
-            <div className="bg-white dark:bg-slate-900 border border-transparent dark:border-white/10 rounded-2xl shadow-2xl w-full max-w-sm flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-50 p-4" onClick={onClose}>
+            <div className="bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border border-white/20 dark:border-white/10 rounded-3xl shadow-2xl w-full max-w-sm flex flex-col overflow-hidden" onClick={e => e.stopPropagation()}>
                 <div className="p-4 border-b border-gray-100 dark:border-white/5 flex justify-between items-center bg-gray-50/50 dark:bg-slate-800/50">
                     <h3 className="text-lg font-semibold text-gray-800 dark:text-slate-100">Edit Profile</h3>
                     <button onClick={onClose} className="p-2 rounded-full text-gray-400 dark:text-slate-500 hover:bg-gray-200 dark:hover:bg-slate-800 hover:text-gray-700 dark:hover:text-slate-300 transition-colors">

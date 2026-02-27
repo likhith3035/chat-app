@@ -1,10 +1,10 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useAuth } from '../context/AuthContext';
 import { useChat } from '../context/ChatContext';
-import { auth, rtdb, ADMIN_EMAILS } from '../firebase';
+import { auth, rtdb, db, CHATS_COL, ADMIN_EMAILS } from '../firebase';
 import { remove, ref, onValue } from 'firebase/database';
+import { doc, updateDoc, arrayUnion, arrayRemove } from 'firebase/firestore';
 import { useNavigate } from 'react-router-dom';
-import { useEffect } from 'react';
 
 import NewChatModal from './modals/NewChatModal';
 import NewRoomModal from './modals/NewRoomModal';
@@ -60,6 +60,9 @@ export default function Sidebar({ activeChatId, onSelectChat }: SidebarProps) {
     const myUserData = currentUser ? users[currentUser.uid] : null;
     const isAdmin = currentUser ? ADMIN_EMAILS.includes(currentUser.email || '') : false;
 
+    // Context Menu State
+    const [contextMenuChatId, setContextMenuChatId] = useState<string | null>(null);
+
     // Render a chat item
     const renderChatItem = (chat: any) => {
         // Hidden chats logic placeholder
@@ -82,6 +85,9 @@ export default function Sidebar({ activeChatId, onSelectChat }: SidebarProps) {
                 isOnline = onlineStatus[partnerId] || false;
             }
         }
+
+        const partnerId = chat.type === 'direct' ? chat.participants.find((uid: string) => uid !== currentUser?.uid) : null;
+        const customStatus = partnerId && users[partnerId]?.customStatus ? users[partnerId].customStatus : null;
 
         if (showOnlyOnline && !isOnline) return null;
 
@@ -111,33 +117,167 @@ export default function Sidebar({ activeChatId, onSelectChat }: SidebarProps) {
             lastMessageDisplay = <span className={`truncate ${lastMsgStyle}`}>{lastMessageText}</span>;
         }
 
+        const isContextMenuOpen = contextMenuChatId === chat.id;
+
         return (
             <div
                 key={chat.id}
-                onClick={() => onSelectChat(chat.id)}
-                className={`p-3 mx-2 my-1 rounded-xl flex items-center hover:bg-gray-100 dark:hover:bg-slate-800 cursor-pointer transition-colors ${activeChatId === chat.id ? 'bg-gray-100 dark:bg-slate-800' : ''}`}
+                onContextMenu={(e) => {
+                    e.preventDefault();
+                    setContextMenuChatId(isContextMenuOpen ? null : chat.id);
+                }}
+                className={`relative mx-3 my-1.5 rounded-2xl transition-all duration-200 select-none hover-lift ${activeChatId === chat.id ? 'bg-white shadow-[0_4px_20px_-4px_rgba(0,0,0,0.08)] border border-gray-100 dark:bg-slate-800 dark:border-slate-700/50' : 'hover:bg-white/60 dark:hover:bg-slate-800/40 border border-transparent'} ${isContextMenuOpen ? 'z-[100]' : 'z-10'}`}
+                style={{ WebkitTouchCallout: 'none' }}
             >
-                <div className="relative flex-shrink-0">
-                    <img src={avatarUrl} alt={chatName} className="h-14 w-14 rounded-full object-cover shadow-sm border border-gray-100 dark:border-slate-700" />
-                    {isOnline && (
-                        <span className="absolute bottom-0 right-0 block h-4 w-4 rounded-full bg-green-500 border-2 border-white dark:border-slate-900 shadow-sm"></span>
+                <div
+                    onClick={() => {
+                        if (isContextMenuOpen) {
+                            setContextMenuChatId(null);
+                        } else {
+                            onSelectChat(chat.id);
+                        }
+                    }}
+                    className="p-3.5 flex items-center cursor-pointer w-full h-full"
+                >
+                    <div className="relative flex-shrink-0">
+                        <img src={avatarUrl} alt={chatName} className="h-14 w-14 rounded-full object-cover shadow-sm border border-gray-100 dark:border-slate-700" />
+                        {isOnline && (
+                            <span className="absolute bottom-0 right-0 block h-4 w-4 rounded-full bg-green-500 border-2 border-white dark:border-slate-900 shadow-sm"></span>
+                        )}
+                    </div>
+                    <div className="ml-4 flex-grow overflow-hidden">
+                        <p className={`text-base truncate flex items-center justify-between`}>
+                            <span className={userNameStyle}>{chatName}</span>
+                            {/* Pin icon placeholder */}
+                            {currentUser && chat.pinnedBy?.includes(currentUser.uid) && <span className="text-xs">📌</span>}
+                        </p>
+                        {customStatus && (
+                            <p className="text-[11px] text-blue-500/80 dark:text-blue-400/80 font-medium truncate mb-0.5 flex items-center gap-1">
+                                <span className="w-1.5 h-1.5 rounded-full bg-blue-500/80 mr-0.5 mt-[1px]"></span>
+                                {customStatus}
+                            </p>
+                        )}
+                        <p className="text-sm truncate mt-0.5 flex items-center gap-1 justify-between">
+                            <span className="flex items-center gap-1 truncate flex-grow">
+                                {lastMessageDisplay}
+                            </span>
+                            <span className="flex items-center gap-1 flex-shrink-0">
+                                {currentUser && chat.mutedBy?.includes(currentUser.uid) && (
+                                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z" clipRule="evenodd" />
+                                        <path strokeLinecap="round" strokeLinejoin="round" d="M17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2" />
+                                    </svg>
+                                )}
+                                {chat.lastUpdated && !isSomeoneTyping && (
+                                    <span className="text-xs text-gray-400 dark:text-slate-500">
+                                        · {new Date(chat.lastUpdated?.seconds * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
+                                    </span>
+                                )}
+                            </span>
+                        </p>
+                    </div>
+                    {isUnread && (
+                        <div className="flex-shrink-0 ml-3 flex flex-col items-center justify-center">
+                            <span className="w-3 h-3 bg-blue-500 rounded-full mt-1"></span>
+                        </div>
                     )}
                 </div>
-                <div className="ml-4 flex-grow overflow-hidden">
-                    <p className={`text-base truncate ${userNameStyle}`}>{chatName}</p>
-                    <p className="text-sm truncate mt-0.5 flex items-center gap-1">
-                        {lastMessageDisplay}
-                        {chat.lastUpdated && !isSomeoneTyping && (
-                            <span className="text-xs text-gray-400 dark:text-slate-500 flex-shrink-0">
-                                · {new Date(chat.lastUpdated?.seconds * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}
-                            </span>
-                        )}
-                    </p>
-                </div>
-                {isUnread && (
-                    <div className="flex-shrink-0 ml-3 flex flex-col items-center justify-center">
-                        <span className="w-3 h-3 bg-blue-500 rounded-full mt-1"></span>
+
+                {/* Context Menu Overlay */}
+                {isContextMenuOpen && (
+                    <div className="absolute right-4 top-10 w-48 bg-white/90 dark:bg-slate-800/90 backdrop-blur-lg rounded-2xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] border border-gray-200/50 dark:border-white/10 overflow-hidden z-20 py-1">
+                        <button
+                            onClick={async () => {
+                                setContextMenuChatId(null);
+                                if (!currentUser) return;
+                                try {
+                                    const chatRef = doc(db, CHATS_COL, chat.id);
+                                    if (chat.pinnedBy?.includes(currentUser.uid)) {
+                                        await updateDoc(chatRef, { pinnedBy: arrayRemove(currentUser.uid) });
+                                    } else {
+                                        await updateDoc(chatRef, { pinnedBy: arrayUnion(currentUser.uid) });
+                                    }
+                                } catch (e) {
+                                    console.error("Error pinning chat", e);
+                                }
+                            }}
+                            className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors flex items-center gap-2"
+                        >
+                            <span>📌</span> {chat.pinnedBy?.includes(currentUser?.uid) ? 'Unpin Chat' : 'Pin Chat'}
+                        </button>
+                        <button
+                            onClick={async () => {
+                                setContextMenuChatId(null);
+                                if (!currentUser) return;
+                                try {
+                                    const chatRef = doc(db, CHATS_COL, chat.id);
+                                    if (chat.mutedBy?.includes(currentUser.uid)) {
+                                        await updateDoc(chatRef, { mutedBy: arrayRemove(currentUser.uid) });
+                                    } else {
+                                        await updateDoc(chatRef, { mutedBy: arrayUnion(currentUser.uid) });
+                                    }
+                                } catch (e) {
+                                    console.error("Error muting chat", e);
+                                }
+                            }}
+                            className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors flex items-center gap-2"
+                        >
+                            <span>🔇</span> {chat.mutedBy?.includes(currentUser?.uid) ? 'Unmute' : 'Mute'}
+                        </button>
+                        <button
+                            onClick={async () => {
+                                setContextMenuChatId(null);
+                                if (!currentUser) return;
+                                try {
+                                    const chatRef = doc(db, CHATS_COL, chat.id);
+                                    if (chat.archivedBy?.includes(currentUser.uid)) {
+                                        await updateDoc(chatRef, { archivedBy: arrayRemove(currentUser.uid) });
+                                    } else {
+                                        await updateDoc(chatRef, { archivedBy: arrayUnion(currentUser.uid), pinnedBy: arrayRemove(currentUser.uid) });
+                                    }
+                                } catch (e) {
+                                    console.error("Error archiving chat", e);
+                                }
+                            }}
+                            className="w-full text-left px-4 py-2.5 text-sm text-gray-700 dark:text-slate-200 hover:bg-gray-100 dark:hover:bg-white/10 transition-colors flex items-center gap-2"
+                        >
+                            <span>📦</span> {chat.archivedBy?.includes(currentUser?.uid) ? 'Unarchive' : 'Archive Chat'}
+                        </button>
+                        <div className="h-px bg-gray-200 dark:bg-white/10 my-1"></div>
+                        <button
+                            onClick={async () => {
+                                setContextMenuChatId(null);
+                                if (!currentUser) return;
+                                if (window.confirm(`Are you sure you want to ${chat.type === 'group' ? 'leave' : 'delete'} this chat?`)) {
+                                    try {
+                                        const chatRef = doc(db, CHATS_COL, chat.id);
+                                        await updateDoc(chatRef, {
+                                            participants: arrayRemove(currentUser.uid),
+                                            pinnedBy: arrayRemove(currentUser.uid),
+                                            archivedBy: arrayRemove(currentUser.uid),
+                                            mutedBy: arrayRemove(currentUser.uid)
+                                        });
+                                        if (activeChatId === chat.id) {
+                                            onSelectChat(''); // clear active chat if it was deleted
+                                        }
+                                    } catch (e) {
+                                        console.error("Error deleting chat", e);
+                                    }
+                                }
+                            }}
+                            className="w-full text-left px-4 py-2.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-500/20 transition-colors flex items-center gap-2 font-medium"
+                        >
+                            <span>🗑️</span> {chat.type === 'group' ? 'Leave Group' : 'Delete Chat'}
+                        </button>
                     </div>
+                )}
+
+                {/* Invisible backdrop to close menu */}
+                {isContextMenuOpen && (
+                    <div
+                        className="fixed inset-0 z-10"
+                        onClick={() => setContextMenuChatId(null)}
+                    ></div>
                 )}
             </div>
         );
@@ -160,8 +300,8 @@ export default function Sidebar({ activeChatId, onSelectChat }: SidebarProps) {
     };
 
     return (
-        <>
-            <div className="p-4 border-b border-gray-200 dark:border-white/5 bg-white dark:bg-slate-900 flex justify-between items-center flex-shrink-0">
+        <div className="flex flex-col h-full bg-white/40 dark:bg-slate-900/40" onClick={() => { if (contextMenuChatId) setContextMenuChatId(null); }}>
+            <div className="p-4 glass-header flex justify-between items-center flex-shrink-0 sticky top-0 z-20">
                 <div className="flex flex-col cursor-pointer max-w-[200px]" onClick={() => setIsProfileModalOpen(true)}>
                     <div className="flex items-center space-x-2">
                         <img className="h-12 w-12 rounded-full object-cover shadow-sm flex-shrink-0" src={myUserData?.avatarUrl || 'https://ui-avatars.com/api/?name=Me&background=random'} alt="Me" />
@@ -195,22 +335,22 @@ export default function Sidebar({ activeChatId, onSelectChat }: SidebarProps) {
                 </div>
             </div>
 
-            <div className="p-4 border-b border-gray-200 dark:border-white/5 flex-shrink-0 bg-white dark:bg-slate-900">
+            <div className="px-5 py-6 flex-shrink-0 bg-transparent border-b border-gray-100 dark:border-white/5">
                 <div className="flex justify-between items-center">
-                    <h2 className="text-2xl font-bold text-gray-900 dark:text-slate-100">Chats<span className="text-sm text-gray-500 dark:text-slate-500 font-normal ml-2">({Object.values(onlineStatus).filter(v => v).length})</span></h2>
+                    <h2 className="text-2xl font-bold bg-gradient-to-r from-gray-900 to-gray-600 dark:from-white dark:to-gray-300 bg-clip-text text-transparent tracking-tight">Chats<span className="text-sm text-gray-400 dark:text-slate-500 font-medium ml-2">({Object.values(onlineStatus).filter(v => v).length})</span></h2>
                     <div className="flex space-x-2">
-                        <button onClick={() => setIsStarredOpen(true)} title="Starred Messages" className="p-2 rounded-full text-gray-500 dark:text-slate-400 hover:bg-gray-200 dark:hover:bg-slate-800 hover:text-gray-800 dark:hover:text-slate-200 transition-colors">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                        <button onClick={() => setIsStarredOpen(true)} title="Starred Messages" className="p-2 rounded-full text-gray-500 dark:text-slate-400 hover:bg-white hover:shadow-sm dark:hover:bg-slate-800 hover:text-gray-800 dark:hover:text-slate-200 transition-all">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z" />
                             </svg>
                         </button>
-                        <button onClick={() => setIsNewRoomOpen(true)} title="Create Public Room" className="p-2 rounded-full text-gray-500 dark:text-slate-400 hover:bg-gray-200 dark:hover:bg-slate-800 hover:text-gray-800 dark:hover:text-slate-200 transition-colors">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                        <button onClick={() => setIsNewRoomOpen(true)} title="Create Public Room" className="p-2 rounded-full text-gray-500 dark:text-slate-400 hover:bg-white hover:shadow-sm dark:hover:bg-slate-800 hover:text-gray-800 dark:hover:text-slate-200 transition-all">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M17 14v6m-3-3h6M6 10h2a2 2 0 002-2V6a2 2 0 00-2-2H6a2 2 0 00-2 2v2a2 2 0 002 2zm10 0h2a2 2 0 002-2V6a2 2 0 00-2-2h-2a2 2 0 00-2 2v2a2 2 0 002 2zM6 20h2a2 2 0 002-2v-2a2 2 0 00-2-2H6a2 2 0 00-2 2v2a2 2 0 002 2z" />
                             </svg>
                         </button>
-                        <button onClick={() => setIsNewChatOpen(true)} title="Start Private Chat" className="p-2 rounded-full text-gray-500 dark:text-slate-400 hover:bg-gray-200 dark:hover:bg-slate-800 hover:text-gray-800 dark:hover:text-slate-200 transition-colors">
-                            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2">
+                        <button onClick={() => setIsNewChatOpen(true)} title="Start Private Chat" className="p-2 rounded-full text-white bg-blue-600 hover:bg-blue-700 shadow-md shadow-blue-500/30 transition-all hover-lift">
+                            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2.5">
                                 <path strokeLinecap="round" strokeLinejoin="round" d="M12 6v6m0 0v6m0-6h6m-6 0H6" />
                             </svg>
                         </button>
@@ -236,7 +376,7 @@ export default function Sidebar({ activeChatId, onSelectChat }: SidebarProps) {
                 </div>
             </div >
 
-            <div className="flex-grow overflow-y-auto w-full bg-white dark:bg-slate-900 custom-scrollbar-light dark:custom-scrollbar-dark pb-2">
+            <div className="flex-grow overflow-y-auto w-full bg-transparent custom-scrollbar-light dark:custom-scrollbar-dark pb-2">
                 {/* Active Now Tray */}
                 {(() => {
                     const activeUsersIds = Object.keys(onlineStatus).filter(uid => onlineStatus[uid] && uid !== currentUser?.uid);
@@ -283,11 +423,48 @@ export default function Sidebar({ activeChatId, onSelectChat }: SidebarProps) {
 
                 {/* Chat List */}
                 <div className="mt-2">
-                    {conversations.length === 0 ? (
-                        <p className="text-gray-500 dark:text-slate-500 p-4 text-center text-sm">No conversations yet. Start a new chat!</p>
-                    ) : (
-                        conversations.map(chat => renderChatItem(chat))
-                    )}
+                    {(() => {
+                        if (conversations.length === 0) {
+                            return <p className="text-gray-500 dark:text-slate-500 p-4 text-center text-sm">No conversations yet. Start a new chat!</p>;
+                        }
+
+                        const visibleChats = conversations.filter(c => {
+                            const isArchived = currentUser && c.archivedBy?.includes(currentUser.uid);
+                            // If showing hidden chats, don't filter them out.
+                            if (!showHiddenChats && isArchived) return false;
+                            return true;
+                        });
+
+                        if (visibleChats.length === 0) {
+                            return <p className="text-gray-500 dark:text-slate-500 p-4 text-center text-sm">No visible chats.</p>;
+                        }
+
+                        const pinned = visibleChats.filter(c => currentUser && c.pinnedBy?.includes(currentUser.uid));
+                        const unpinned = visibleChats.filter(c => !(currentUser && c.pinnedBy?.includes(currentUser.uid)));
+
+                        return (
+                            <>
+                                {pinned.length > 0 && (
+                                    <div className="mb-2">
+                                        <div className="px-4 py-1 flex items-center gap-2 text-xs font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-wider">
+                                            <span>📌</span> Pinned
+                                        </div>
+                                        {pinned.map(chat => renderChatItem(chat))}
+                                    </div>
+                                )}
+                                {unpinned.length > 0 && (
+                                    <div>
+                                        {pinned.length > 0 && (
+                                            <div className="px-4 py-1 flex items-center gap-2 text-xs font-semibold text-gray-400 dark:text-slate-500 uppercase tracking-wider">
+                                                <span>💬</span> Recent
+                                            </div>
+                                        )}
+                                        {unpinned.map(chat => renderChatItem(chat))}
+                                    </div>
+                                )}
+                            </>
+                        );
+                    })()}
                 </div>
             </div>
 
@@ -387,6 +564,6 @@ export default function Sidebar({ activeChatId, onSelectChat }: SidebarProps) {
                     <StarredMessagesModal onClose={() => setIsStarredOpen(false)} />
                 )
             }
-        </>
+        </div>
     );
 }

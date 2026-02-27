@@ -2,6 +2,10 @@ import { useState, useEffect, useRef } from 'react';
 import { createPortal } from 'react-dom';
 import { db, CHATS_COL } from '../firebase';
 import { doc, updateDoc } from 'firebase/firestore';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import ImageModal from './modals/ImageModal';
 import ReactionDetailsModal from './modals/ReactionDetailsModal';
 
@@ -25,9 +29,15 @@ interface LinkPreviewData {
 interface Message {
     id: string;
     senderId: string;
+    type?: 'text' | 'image' | 'audio' | 'poll';
     text?: string;
     imageUrl?: string;
     audioUrl?: string;
+    pollData?: {
+        question: string;
+        options: { id: string; text: string; votes: string[] }[];
+        votedBy?: string[];
+    };
     timestamp?: any;
     reactions?: Record<string, string[]>;
     replyTo?: {
@@ -57,12 +67,12 @@ interface MessageBubbleProps {
     searchQuery?: string;
     isFirstInGroup?: boolean;
     isLastInGroup?: boolean;
-    isLastRead?: boolean;
+    isRead?: boolean;
     themeGradient?: string;
     animationDelay?: string;
 }
 
-export default function MessageBubble({ message, isOwn, senderData, isGroup, chatId, currentUserId, onReply, onForward, onEdit, onPin, onQuoteClick, searchQuery, isFirstInGroup = true, isLastInGroup = true, isLastRead = false, themeGradient, animationDelay }: MessageBubbleProps) {
+export default function MessageBubble({ message, isOwn, senderData, isGroup, chatId, currentUserId, onReply, onForward, onEdit, onPin, onQuoteClick, searchQuery, isFirstInGroup = true, isLastInGroup = true, isRead = false, themeGradient, animationDelay }: MessageBubbleProps) {
     const [showReactions, setShowReactions] = useState(false);
     const [showContextMenu, setShowContextMenu] = useState(false);
     const [copied, setCopied] = useState(false);
@@ -309,25 +319,25 @@ export default function MessageBubble({ message, isOwn, senderData, isGroup, cha
 
                     <div className="relative">
                         {(() => {
-                            let radiusClass = 'rounded-2xl';
+                            let radiusClass = 'rounded-[20px]';
                             if (isOwn) {
-                                if (isFirstInGroup && isLastInGroup) radiusClass = 'rounded-2xl';
-                                else if (isFirstInGroup) radiusClass = 'rounded-2xl rounded-br-sm';
-                                else if (isLastInGroup) radiusClass = 'rounded-2xl rounded-tr-sm';
-                                else radiusClass = 'rounded-2xl rounded-tr-sm rounded-br-sm';
+                                if (isFirstInGroup && isLastInGroup) radiusClass = 'rounded-[20px]';
+                                else if (isFirstInGroup) radiusClass = 'rounded-[20px] rounded-br-md';
+                                else if (isLastInGroup) radiusClass = 'rounded-[20px] rounded-tr-md';
+                                else radiusClass = 'rounded-[20px] rounded-tr-md rounded-br-md';
                             } else {
-                                if (isFirstInGroup && isLastInGroup) radiusClass = 'rounded-2xl';
-                                else if (isFirstInGroup) radiusClass = 'rounded-2xl rounded-bl-sm';
-                                else if (isLastInGroup) radiusClass = 'rounded-2xl rounded-tl-sm';
-                                else radiusClass = 'rounded-2xl rounded-tl-sm rounded-bl-sm';
+                                if (isFirstInGroup && isLastInGroup) radiusClass = 'rounded-[20px]';
+                                else if (isFirstInGroup) radiusClass = 'rounded-[20px] rounded-bl-md';
+                                else if (isLastInGroup) radiusClass = 'rounded-[20px] rounded-tl-md';
+                                else radiusClass = 'rounded-[20px] rounded-tl-md rounded-bl-md';
                             }
 
                             const bgClass = isOwn
-                                ? (themeGradient || 'bg-gradient-to-tr from-violet-500 via-fuchsia-500 to-pink-500 text-white border-transparent')
-                                : 'bg-white dark:bg-slate-800 border-gray-200 dark:border-white/5 text-gray-800 dark:text-slate-100';
+                                ? (themeGradient || 'bg-gradient-to-bl from-blue-500 via-blue-600 to-indigo-600 text-white border-transparent shadow-[0_4px_14px_0_rgba(59,130,246,0.25)]')
+                                : 'bg-white/90 dark:bg-slate-800/90 backdrop-blur-md border-gray-200/50 dark:border-white/10 text-gray-800 dark:text-slate-100 shadow-[0_4px_14px_0_rgba(0,0,0,0.04)]';
 
                             return (
-                                <div className={`px-4 py-3 shadow-sm border ${bgClass} ${radiusClass}`}>
+                                <div className={`px-4 py-2.5 border transition-all duration-200 ${bgClass} ${radiusClass}`}>
                                     {/* Reply quote */}
                                     {message.replyTo && (
                                         <div
@@ -357,8 +367,120 @@ export default function MessageBubble({ message, isOwn, senderData, isGroup, cha
                                         <div className="flex items-center gap-2">
                                             <audio controls className={`max-w-[200px] md:max-w-[250px] h-10 ${isOwn ? 'grayscale contrast-150' : ''}`} src={message.audioUrl} />
                                         </div>
+                                    ) : message.pollData ? (
+                                        <div className={`text-sm w-full min-w-[200px] ${isOwn ? 'text-white' : 'text-gray-800 dark:text-slate-100'}`}>
+                                            <p className="font-bold mb-3 text-[15px]">{message.pollData.question}</p>
+                                            <div className="space-y-2">
+                                                {message.pollData.options.map((opt) => {
+                                                    const totalVotes = message.pollData?.votedBy?.length || 0;
+                                                    const optVotes = opt.votes.length;
+                                                    const percent = totalVotes > 0 ? Math.round((optVotes / totalVotes) * 100) : 0;
+                                                    const hasVotedThis = opt.votes.includes(currentUserId);
+
+                                                    return (
+                                                        <div
+                                                            key={opt.id}
+                                                            onClick={async (e) => {
+                                                                e.preventDefault();
+                                                                e.stopPropagation();
+                                                                try {
+                                                                    const msgRef = doc(db, CHATS_COL, chatId, 'messages', message.id);
+                                                                    const currentPollData = message.pollData;
+                                                                    if (!currentPollData) return;
+
+                                                                    const newOptions = currentPollData.options.map(o => {
+                                                                        const votesWithoutUser = o.votes.filter(uid => uid !== currentUserId);
+                                                                        if (o.id === opt.id && !o.votes.includes(currentUserId)) {
+                                                                            votesWithoutUser.push(currentUserId);
+                                                                        }
+                                                                        return { ...o, votes: votesWithoutUser };
+                                                                    });
+
+                                                                    const allVoters = new Set<string>();
+                                                                    newOptions.forEach(o => o.votes.forEach(uid => allVoters.add(uid)));
+
+                                                                    await updateDoc(msgRef, {
+                                                                        pollData: {
+                                                                            ...currentPollData,
+                                                                            options: newOptions,
+                                                                            votedBy: Array.from(allVoters)
+                                                                        }
+                                                                    });
+                                                                } catch (err) {
+                                                                    console.error(err);
+                                                                }
+                                                            }}
+                                                            className={`relative overflow-hidden rounded-xl border cursor-pointer transition-all hover:brightness-95 ${hasVotedThis ? (isOwn ? 'border-white bg-blue-500/50 shadow-inner' : 'border-blue-500/50 bg-blue-50 dark:bg-blue-900/40 shadow-inner') : (isOwn ? 'border-blue-300/30 bg-blue-700/20' : 'border-gray-200 dark:border-slate-700 bg-gray-50/50 dark:bg-slate-800/50')} py-2.5 px-3 z-10 flex`}
+                                                        >
+                                                            <div
+                                                                className={`absolute inset-y-0 left-0 transition-all duration-500 ease-out z-0 rounded-r-xl ${isOwn ? 'bg-white/20' : 'bg-blue-500/15 dark:bg-blue-500/20'}`}
+                                                                style={{ width: `${percent}%` }}
+                                                            ></div>
+                                                            <div className="relative z-10 flex justify-between items-center w-full font-medium">
+                                                                <span className="flex items-center gap-2">
+                                                                    {hasVotedThis && (
+                                                                        <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4 shrink-0" viewBox="0 0 20 20" fill="currentColor">
+                                                                            <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                                                        </svg>
+                                                                    )}
+                                                                    <span className="leading-tight">{opt.text}</span>
+                                                                </span>
+                                                                {totalVotes > 0 && <span className="text-xs opacity-80 shrink-0 ml-3 font-bold">{percent}%</span>}
+                                                            </div>
+                                                        </div>
+                                                    )
+                                                })}
+                                            </div>
+                                            <p className="text-[10px] opacity-70 mt-3 text-right font-medium uppercase tracking-wider">
+                                                {message.pollData.votedBy?.length || 0} vote{(message.pollData.votedBy?.length !== 1) ? 's' : ''}
+                                            </p>
+                                        </div>
                                     ) : (
-                                        <p className="text-sm break-words whitespace-pre-wrap">{renderText(message.text)}</p>
+                                        <div className={`text-sm break-words markdown-content ${isOwn ? 'text-white' : 'text-gray-800 dark:text-slate-100'}`}>
+                                            <ReactMarkdown
+                                                remarkPlugins={[remarkGfm]}
+                                                components={{
+                                                    code({ node, inline, className, children, ...props }: any) {
+                                                        const match = /language-(\w+)/.exec(className || '');
+                                                        return !inline && match ? (
+                                                            <div className="relative group mt-2 mb-2 max-w-full overflow-hidden rounded-md border border-slate-700/50 shadow-sm">
+                                                                <div className="absolute right-2 top-2 z-10 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                                    <button
+                                                                        onClick={(e) => {
+                                                                            e.preventDefault();
+                                                                            e.stopPropagation();
+                                                                            navigator.clipboard.writeText(String(children).replace(/\n$/, ''));
+                                                                        }}
+                                                                        className="bg-slate-700 hover:bg-slate-600 text-slate-200 text-[10px] uppercase font-bold tracking-wider px-2 py-1 rounded transition-colors shadow-sm"
+                                                                    >
+                                                                        Copy
+                                                                    </button>
+                                                                </div>
+                                                                <div className="bg-slate-800/80 px-4 py-1.5 text-[10px] uppercase tracking-wider text-slate-400 font-semibold border-b border-slate-700/50">
+                                                                    {match[1]}
+                                                                </div>
+                                                                <SyntaxHighlighter
+                                                                    {...props}
+                                                                    style={vscDarkPlus as any}
+                                                                    language={match[1]}
+                                                                    PreTag="div"
+                                                                    className="!m-0 !bg-[#1e1e1e] text-xs custom-scrollbar-light"
+                                                                    customStyle={{ padding: '1rem', backgroundColor: '#1e1e1e' }}
+                                                                >
+                                                                    {String(children).replace(/\n$/, '')}
+                                                                </SyntaxHighlighter>
+                                                            </div>
+                                                        ) : (
+                                                            <code {...props} className={className ? className + " bg-black/10 dark:bg-white/10 px-1.5 py-0.5 rounded-md text-[13px] font-mono" : "bg-black/10 dark:bg-white/10 px-1.5 py-0.5 rounded-md text-[13px] font-mono"}>
+                                                                {children}
+                                                            </code>
+                                                        )
+                                                    }
+                                                }}
+                                            >
+                                                {message.text || ''}
+                                            </ReactMarkdown>
+                                        </div>
                                     )}
 
                                     {linkPreview && !message.isDeleted && (
@@ -380,21 +502,21 @@ export default function MessageBubble({ message, isOwn, senderData, isGroup, cha
                                                 <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
                                             </svg>
                                         )}
-                                        <p className={`text-[10px] ${isOwn ? 'text-blue-200' : 'text-gray-400 dark:text-slate-500'}`}>
-                                            {timestamp}{isEdited && <span className="ml-1 italic opacity-80">(edited)</span>}
+                                        <p className={`text-[10px] flex items-center gap-1 ${isOwn ? 'text-blue-100' : 'text-gray-400 dark:text-slate-500'}`}>
+                                            {timestamp}{isEdited && <span className="italic opacity-80">(edited)</span>}
+                                            {isOwn && (
+                                                <span className="flex">
+                                                    <svg xmlns="http://www.w3.org/2000/svg" className={`h-4 w-4 ${isRead ? 'text-blue-300 drop-shadow-sm' : 'opacity-70 text-gray-300 dark:text-gray-500'}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={isRead ? "2.5" : "2"}>
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7M5 13l4 4L19 7" />
+                                                        <path strokeLinecap="round" strokeLinejoin="round" d="M10 13l4 4L24 7M10 13l4 4L24 7" className="translate-x-[-5px]" />
+                                                    </svg>
+                                                </span>
+                                            )}
                                         </p>
-                                        {/* Read receipt ticks removed, replaced with Seen below */}
                                     </div>
                                 </div>
                             );
                         })()}
-
-                        {/* Seen Indicator */}
-                        {isLastRead && isOwn && (
-                            <div className="text-[11px] text-gray-500 dark:text-gray-400 mt-1 flex justify-end w-full font-medium tracking-wide">
-                                Seen
-                            </div>
-                        )}
 
                         {/* Temporary Heart Animation on Double Click */}
                         {showHeartAnimation && (

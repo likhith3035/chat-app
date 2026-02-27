@@ -112,8 +112,8 @@ export default function NewChatModal({ onClose, onChatCreated }: NewChatModalPro
     };
 
     return (
-        <div className="fixed inset-0 bg-gray-600/75 dark:bg-black/60 flex items-center justify-center z-40 p-4">
-            <div className="bg-white dark:bg-slate-900 border border-transparent dark:border-white/10 rounded-xl shadow-2xl w-full max-w-md p-6">
+        <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center z-40 p-4 animate-fade-in-up">
+            <div className="bg-white/90 dark:bg-slate-900/90 backdrop-blur-md border border-white/20 dark:border-white/10 rounded-3xl shadow-[0_8px_30px_rgb(0,0,0,0.12)] w-full max-w-md p-6">
                 <h2 className="text-xl font-semibold mb-4 text-gray-800 dark:text-slate-100">New Chat</h2>
 
                 {/* Search input */}

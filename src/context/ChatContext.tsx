@@ -26,6 +26,9 @@ interface ChatData {
     groupAvatar?: string;
     theme?: string;
     nicknames?: Record<string, string>;
+    pinnedBy?: string[];
+    archivedBy?: string[];
+    mutedBy?: string[];
 }
 
 interface ChatContextType {
