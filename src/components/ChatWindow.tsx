@@ -697,7 +697,6 @@ export default function ChatWindow({ chatId, onBack }: ChatWindowProps) {
                                                     onEdit={() => { setEditingMsg(msg); setInputText(msg.text || ''); textareaRef.current?.focus(); }}
                                                     onPin={() => handlePinMessage(msg)}
                                                     onQuoteClick={handleQuoteClick}
-                                                    searchQuery={searchQuery}
                                                     isFirstInGroup={isFirstInGroup}
                                                     isLastInGroup={isLastInGroup}
                                                     isRead={!!(msg.readBy && msg.readBy.length >= participantCount)}

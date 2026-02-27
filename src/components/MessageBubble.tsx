@@ -64,15 +64,13 @@ interface MessageBubbleProps {
     onEdit?: () => void;
     onPin?: () => void;
     onQuoteClick?: (msgId: string) => void;
-    searchQuery?: string;
     isFirstInGroup?: boolean;
     isLastInGroup?: boolean;
     isRead?: boolean;
     themeGradient?: string;
-    animationDelay?: string;
 }
 
-export default function MessageBubble({ message, isOwn, senderData, isGroup, chatId, currentUserId, onReply, onForward, onEdit, onPin, onQuoteClick, searchQuery, isFirstInGroup = true, isLastInGroup = true, isRead = false, themeGradient, animationDelay }: MessageBubbleProps) {
+export default function MessageBubble({ message, isOwn, senderData, isGroup, chatId, currentUserId, onReply, onForward, onEdit, onPin, onQuoteClick, isFirstInGroup = true, isLastInGroup = true, isRead = false, themeGradient }: MessageBubbleProps) {
     const [showReactions, setShowReactions] = useState(false);
     const [showContextMenu, setShowContextMenu] = useState(false);
     const [copied, setCopied] = useState(false);
@@ -116,17 +114,6 @@ export default function MessageBubble({ message, isOwn, senderData, isGroup, cha
     const isEdited = !!message.editedAt;
 
     const senderName = (!isOwn && isGroup) ? (senderData?.name || 'Unknown User') : null;
-
-    const renderText = (text?: string) => {
-        if (!text) return null;
-        if (!searchQuery) return text;
-        const parts = text.split(new RegExp(`(${searchQuery})`, 'gi'));
-        return parts.map((part, index) =>
-            part.toLowerCase() === searchQuery.toLowerCase()
-                ? <mark key={index} className="bg-yellow-300 dark:bg-yellow-500 text-gray-900 rounded px-0.5 font-medium shadow-sm">{part}</mark>
-                : part
-        );
-    };
 
     const handleReaction = async (emoji: string) => {
         try {
@@ -280,7 +267,6 @@ export default function MessageBubble({ message, isOwn, senderData, isGroup, cha
     return (
         <div
             className={`msg-entrance relative ${showReactions || showContextMenu ? 'z-50' : 'z-10'}`}
-            style={{ animationDelay }}
             onMouseLeave={() => setShowReactions(false)}
         >
             <div
@@ -716,6 +702,6 @@ export default function MessageBubble({ message, isOwn, senderData, isGroup, cha
                 }
             `}</style>
             </div>
-        </div>
+        </div >
     );
 }
